@@ -1,0 +1,50 @@
+{
+  "name": "biosim",
+  "version": "6.8.0",
+  "description": "BioSim — Simulador bioclimatico autocontenido (escritorio)",
+  "author": "Universidad de San Buenaventura - Pasto",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "co.edu.usb.biosim",
+    "productName": "BioSim",
+    "copyright": "Universidad de San Buenaventura - Pasto",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "app/**/*",
+      "package.json"
+    ],
+    "compression": "maximum",
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "portable": {
+      "artifactName": "BioSim-${version}-portable.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "BioSim-${version}-setup.exe",
+      "shortcutName": "BioSim"
+    }
+  }
+}
