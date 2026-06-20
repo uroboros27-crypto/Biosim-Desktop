@@ -20,20 +20,28 @@
     "productName": "BioSim",
     "copyright": "Universidad de San Buenaventura - Pasto",
     "directories": {
-      "output": "dist",
-      "buildResources": "build"
+      "output": "dist"
     },
     "files": [
       "src/**/*",
-      "app/**/*",
+      "BioSim_v6_8.html",
       "package.json"
     ],
     "compression": "maximum",
     "win": {
-      "icon": "build/icon.ico",
       "target": [
-        { "target": "portable", "arch": ["x64"] },
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "portable": {
