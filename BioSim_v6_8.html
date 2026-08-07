@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v7.1</title>
+<title>BioSim v7.2</title>
 <!-- ════════════════════════════════════════════════════════════════
      DEPENDENCIAS EMBEBIDAS — cero CDN, 100% offline
        · Three.js r128 (MIT)  · Chart.js 4.4.0 (MIT)
@@ -4122,7 +4122,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v7.1</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v7.2</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5989,7 +5989,9 @@ function init3D(){
   // far/near de 2×10⁶ es aceptable para Z-buffer de 24 bits en proyectos
   // arquitectónicos.
   camera=new THREE.PerspectiveCamera(55,W/H,0.001,2000);
-  renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:false,preserveDrawingBuffer:true});
+  // v7.2: alpha:true para permitir exportación PNG con fondo transparente.
+  // Mientras scene.background tenga color, el canvas se ve opaco igual que antes.
+  renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true,preserveDrawingBuffer:true});
   renderer.setPixelRatio(Math.min(devicePixelRatio,2));
   // setSize con updateStyle=true para que el canvas CSS coincida
   renderer.setSize(W,H,true);
@@ -22971,25 +22973,82 @@ function hideCtxMenu(){
   _ctxTarget=null;
 }
 
+// ── v7.2: Exportar vista como PNG con opciones ─────────────────────
+// Diálogo previo: resolución (100/150/200 %) y fondo transparente.
 function ctxExportViewPNG(){
   hideCtxMenu();
-  // Force a render pass with the active camera
-  renderer.render(scene, activeCamera ? activeCamera() : camera);
-  // The WebGL canvas is id='cv', not 'viewCanvas'
+  let dlg = document.getElementById('exportViewDlg');
+  if(dlg) dlg.remove();
+  dlg = document.createElement('div');
+  dlg.id = 'exportViewDlg';
+  dlg.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;font-family:Inter,sans-serif;color:#223';
+  const radio = (v,chk)=>`<label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:.78rem"><input type="radio" name="evScale" value="${v}" ${chk?'checked':''} style="accent-color:#2f6fed">${v} %</label>`;
+  dlg.innerHTML = `
+    <div style="background:#fff;border-radius:9px;padding:18px 20px;width:300px;box-shadow:0 10px 40px rgba(0,0,0,.35)">
+      <div style="font-weight:700;font-size:.95rem;margin-bottom:12px">📷 Exportar vista como PNG</div>
+      <div style="font-size:.72rem;color:#667;margin-bottom:4px">Resolución</div>
+      <div style="display:flex;gap:14px;margin-bottom:12px">${radio(100,true)}${radio(150,false)}${radio(200,false)}</div>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:.78rem;margin-bottom:6px">
+        <input type="checkbox" id="evTransp" style="accent-color:#2f6fed"> Fondo transparente
+      </label>
+      <div style="font-size:.62rem;color:#889;margin-bottom:14px">Sin el color de fondo de la escena; la geometría y la rejilla se conservan.</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button id="evCancel" style="padding:5px 14px;border:1px solid #ccd;border-radius:5px;background:#f4f6fa;cursor:pointer;font-size:.78rem">Cancelar</button>
+        <button id="evOk" style="padding:5px 14px;border:none;border-radius:5px;background:#2f6fed;color:#fff;font-weight:600;cursor:pointer;font-size:.78rem">Exportar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(dlg);
+  const close = ()=>{ if(dlg.parentNode) dlg.parentNode.removeChild(dlg); };
+  dlg.addEventListener('mousedown', e=>{ if(e.target===dlg) close(); });
+  dlg.querySelector('#evCancel').onclick = close;
+  dlg.querySelector('#evOk').onclick = ()=>{
+    const scale = parseInt((dlg.querySelector('input[name="evScale"]:checked')||{}).value||'100',10)/100;
+    const transp = dlg.querySelector('#evTransp').checked;
+    close();
+    _doExportViewPNG(scale, transp);
+  };
+}
+
+// Render temporal a mayor resolución y/o sin fondo, captura y restaura la vista.
+function _doExportViewPNG(scale, transparent){
   const cv = document.getElementById('cv');
-  if(!cv){ log('Canvas no encontrado','err'); return; }
-  cv.toBlob(blob=>{
-    if(!blob){ log('No se pudo capturar la vista','err'); return; }
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    const ts = new Date().toISOString().slice(0,19).replace(/[T:]/g,'-');
-    a.download = 'biosim_vista_'+ts+'.png';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(a.href), 30000);
-    log('Vista exportada como PNG', 'ok');
-  }, 'image/png');
+  if(!cv || !renderer){ log('Canvas no encontrado','err'); return; }
+  const cam = activeCamera ? activeCamera() : camera;
+  // Estado actual
+  const size   = renderer.getSize(new THREE.Vector2());
+  const pr     = renderer.getPixelRatio();
+  const savedBG  = scene.background;
+  const savedFog = scene.fog;
+  if(transparent){
+    scene.background = null;
+    scene.fog = null;
+    renderer.setClearColor(0x000000, 0);   // clear con alfa 0 → PNG transparente
+  }
+  // Render a la resolución pedida (updateStyle=false: el CSS no cambia)
+  renderer.setPixelRatio(pr * scale);
+  renderer.setSize(size.x, size.y, false);
+  renderer.render(scene, cam);
+  // toDataURL es síncrono: la captura queda resuelta antes de restaurar
+  const dataUrl = cv.toDataURL('image/png');
+  const outW = cv.width, outH = cv.height;
+  // Restaurar vista normal
+  renderer.setPixelRatio(pr);
+  renderer.setSize(size.x, size.y, false);
+  if(transparent){
+    scene.background = savedBG;
+    scene.fog = savedFog;
+    renderer.setClearColor(0x000000, 1);
+  }
+  renderer.render(scene, cam);
+  // Descargar
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  const ts = new Date().toISOString().slice(0,19).replace(/[T:]/g,'-');
+  a.download = 'biosim_vista_' + Math.round(scale*100) + 'pc' + (transparent?'_sinfondo':'') + '_' + ts + '.png';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  log(`Vista exportada ${outW}×${outH}px (${Math.round(scale*100)} %${transparent?', fondo transparente':''})`, 'ok');
 }
 
 // ── Context actions ──────────────────────────────────────────────
@@ -23084,7 +23143,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(620px,95vw);max-height:88vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v7.1</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v7.2</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -23772,7 +23831,7 @@ function toggleBottomPanel(force){
   <div id="ctxHeader" style="padding:6px 12px 5px;font-size:.62rem;font-family:var(--font-mono);color:var(--text3);border-bottom:1px solid var(--border);background:var(--bg3)"></div>
   <!-- Export viewport as PNG -->
   <div class="ctx-item" id="ctxExportPNG" onclick="ctxExportViewPNG()">
-    <span class="ctx-icon">&#128247;</span> Exportar vista como PNG
+    <span class="ctx-icon">&#128247;</span> Exportar vista como PNG…
   </div>
   <!-- Rename -->
   <div class="ctx-item" id="ctxRename" onclick="ctxRename()">
