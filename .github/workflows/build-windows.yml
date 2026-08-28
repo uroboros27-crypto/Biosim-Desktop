@@ -2,7 +2,7 @@ name: Build Windows
 
 # Compila BioSim para Windows x64 en los runners de GitHub.
 #  - Manualmente: pestaña Actions -> "Build Windows" -> Run workflow.
-#  - Automaticamente: al empujar una etiqueta v* (p.ej. v7.2.0), ademas
+#  - Automaticamente: al empujar una etiqueta v* (p.ej. v7.2.1), ademas
 #    publica un Release con los .exe adjuntos.
 
 on:
@@ -11,8 +11,6 @@ on:
       - 'v*'
   workflow_dispatch:
 
-# Permiso explicito para que el paso de Release pueda publicar
-# (buena practica; antes dependia del permiso por defecto del repo).
 permissions:
   contents: write
 
@@ -22,37 +20,58 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7        # node24 nativo [^23^]
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7      # node24 nativo
+        uses: actions/setup-node@v6
         with:
-          # Este es el Node del TOOLCHAIN de compilacion (npm/electron-builder),
-          # NO el runtime de las acciones. Node 20 quedo EOL en abril 2026;
-          # 22 es LTS hasta abril 2027 y electron-builder es compatible.
-          # Si prefieres cambio minimo, puedes dejar '20' y seguira instalando.
           node-version: '22'
-          package-manager-cache: false   # evita la cache automatica nueva de v5+
+
+      # Comprobacion previa: si el HTML no esta en el repo, el .exe saldria
+      # vacio o con una version vieja. Mejor fallar aqui, con un mensaje claro.
+      - name: Verificar que el HTML de la aplicacion existe
+        shell: pwsh
+        run: |
+          $html = Get-ChildItem -Path . -Filter 'BioSim*.html' -File
+          if ($html.Count -eq 0) {
+            Write-Error 'No hay ningun archivo BioSim*.html en la raiz del repositorio.'
+            exit 1
+          }
+          Write-Host "HTML encontrado:"
+          $html | ForEach-Object { Write-Host ("  {0}  ({1:N0} bytes)" -f $_.Name, $_.Length) }
+          if ($html.Count -gt 1) {
+            Write-Warning 'Hay mas de un BioSim*.html. main.js cargara el de nombre mas alto; borra los antiguos.'
+          }
 
       - name: Install dependencies
         run: npm install
 
       - name: Build portable + installer (x64)
         run: npm run dist
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v7  # node24 desde v6 [^22^]
+      # Comprobacion posterior: confirmar que el HTML viajo dentro del paquete.
+      - name: Verificar contenido del paquete
+        shell: pwsh
+        run: |
+          npx --yes asar list dist/win-unpacked/resources/app.asar | Select-String 'BioSim.*\.html'
+          if ($LASTEXITCODE -ne 0) { Write-Error 'El HTML no quedo dentro de app.asar.'; exit 1 }
+
+      # Los .exe pesan ~100-200 MB cada uno. Subirlos ademas como artifacts
+      # consume rapido la cuota de 500 MB del plan gratuito, asi que solo se
+      # hace en ejecuciones manuales y con caducidad corta. En etiquetas v*,
+      # los binarios van al Release, que no consume esa cuota.
+      - name: Upload build artifacts (solo ejecucion manual)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v5
         with:
           name: BioSim-windows-x64
-          path: |
-            dist/*.exe
+          path: dist/*.exe
+          retention-days: 5
           if-no-files-found: error
 
       - name: Publish GitHub Release (solo en etiquetas v*)
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v3   # node24; v2 ya no tiene soporte [^40^]
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.exe
           generate_release_notes: true
