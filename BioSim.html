@@ -7406,6 +7406,13 @@ function selectAll(){
     else if(s.mesh) omitted++;
   });
   updateSelVis(); renderZoneTree(); updateStatus();
+  // v7.2.3: los comandos del menú «Selección» cambiaban `sel` pero NUNCA
+  // repintaban el panel derecho — a diferencia del clic en el visor, que sí
+  // lo hace. El panel seguía mostrando la superficie anterior: tras
+  // «Todos los muros» se leía la etiqueta de la cubierta clicada antes, y
+  // los botones ✕ de Construcción actuaban sobre esa superficie obsoleta,
+  // fuera de la selección.
+  _refreshPropsPanel();
   log(`Seleccionadas ${sel.size} superficies (${sel.size - before} nuevas)` +
       (omitted ? ` · ${omitted} omitida(s) por estar ocultas o bloqueadas.` : '.'), 'ok');
 }
@@ -7414,6 +7421,7 @@ function clearSelection(){
   const before = sel.size;
   sel.clear();
   updateSelVis(); renderZoneTree(); updateStatus();
+  _refreshPropsPanel();
   if(before > 0) log(`Deseleccionadas ${before} superficies.`, 'ok');
 }
 
@@ -7425,6 +7433,7 @@ function invertSelection(){
   sel.clear();
   newSel.forEach(id => sel.add(id));
   updateSelVis(); renderZoneTree(); updateStatus();
+  _refreshPropsPanel();
   log(`Selección invertida: ${sel.size} superficies activas.`, 'ok');
 }
 
@@ -7449,6 +7458,7 @@ function selectByTag(tag){
     }
   });
   updateSelVis(); renderZoneTree(); updateStatus();
+  _refreshPropsPanel();
   const TAG_LBL = {muro:'muros', cubierta:'cubiertas', losa:'losas', piso:'pisos', ventana:'ventanas', puerta:'puertas', 'adiabática':'adiabáticas'};
   const lbl = TAG_LBL[tag] || tag;
   const omitTxt = omitted ? ` · ${omitted} omitida(s) por estar en zonas ocultas o bloqueadas` : '';
@@ -7478,6 +7488,7 @@ function selectByPartition(kind){
     }
   });
   updateSelVis(); renderZoneTree(); updateStatus();
+  _refreshPropsPanel();
   const KIND_LBL = {exterior:'exteriores', shared:'particiones compartidas', interior:'interiores simples'};
   const lbl = KIND_LBL[kind] || kind;
   const omitTxt2 = omitted ? ` · ${omitted} omitida(s) por estar ocultas o bloqueadas` : '';
@@ -7492,6 +7503,7 @@ function selectByPartition(kind){
 
 function clearSel(){
   sel.clear(); updateSelVis(); renderZoneTree(); updateStatus();
+  _refreshPropsPanel();
 }
 
 const SEL_COLOR=new THREE.Color(0xd45a1a);   // amarillo selección
@@ -10743,9 +10755,17 @@ function addSurfLayer(sid){
   s.layers.push({matId:'MORT',e:0.015}); showSurfProps(s);
 }
 function delSurfLayer(sid,li){
-  const s=surfaces.find(x=>x.id===sid); if(!s||s.layers.length<=1) return;
+  const s=surfaces.find(x=>x.id===sid);
+  if(!s){ log('Superficie no encontrada — el panel estaba desactualizado.','err'); _refreshPropsPanel(); return; }
+  // v7.2.3: antes esto era un `return` mudo y el usuario veía el botón ✕
+  // sin ningún efecto ni explicación.
+  if(s.layers.length<=1){ log(`"${s.name}" solo tiene una capa — no se puede eliminar (una superficie necesita al menos una).`,'warn'); return; }
   if(isSurfaceLocked(s)){ log(`🔒 "${s.name}" está en zona bloqueada — capa no eliminada.`,'warn'); return; }
-  s.layers.splice(li,1); showSurfProps(s);
+  _undoPush();   // estado ANTES del cambio
+  s.layers.splice(li,1);
+  aplicarColorMaterial(s);
+  showSurfProps(s);
+  log(`Capa ${li+1} eliminada de "${s.name}".`,'ok');
 }
 
 // ═══════════════════════════════════════
