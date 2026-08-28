@@ -4,6 +4,11 @@ name: Build Windows
 #  - Manualmente: pestaña Actions -> "Build Windows" -> Run workflow.
 #  - Automaticamente: al empujar una etiqueta v* (p.ej. v7.2.1), ademas
 #    publica un Release con los .exe adjuntos.
+#
+# NOTA sobre la publicacion: electron-builder se ejecuta con --publish never
+# (ver package.json). La publicacion la hace UN SOLO paso, el de
+# softprops/action-gh-release al final. Si se deja que electron-builder
+# publique por su cuenta, exige GH_TOKEN y compiten por el mismo Release.
 
 on:
   push:
@@ -32,12 +37,12 @@ jobs:
       - name: Verificar que el HTML de la aplicacion existe
         shell: pwsh
         run: |
-          $html = Get-ChildItem -Path . -Filter 'BioSim*.html' -File
+          $html = @(Get-ChildItem -Path . -Filter 'BioSim*.html' -File)
           if ($html.Count -eq 0) {
             Write-Error 'No hay ningun archivo BioSim*.html en la raiz del repositorio.'
             exit 1
           }
-          Write-Host "HTML encontrado:"
+          Write-Host 'HTML encontrado:'
           $html | ForEach-Object { Write-Host ("  {0}  ({1:N0} bytes)" -f $_.Name, $_.Length) }
           if ($html.Count -gt 1) {
             Write-Warning 'Hay mas de un BioSim*.html. main.js cargara el de nombre mas alto; borra los antiguos.'
@@ -53,8 +58,20 @@ jobs:
       - name: Verificar contenido del paquete
         shell: pwsh
         run: |
-          npx --yes asar list dist/win-unpacked/resources/app.asar | Select-String 'BioSim.*\.html'
-          if ($LASTEXITCODE -ne 0) { Write-Error 'El HTML no quedo dentro de app.asar.'; exit 1 }
+          $listado = npx --yes @electron/asar list dist/win-unpacked/resources/app.asar
+          $encontrado = @($listado | Where-Object { $_ -match 'BioSim.*\.html$' })
+          if ($encontrado.Count -eq 0) {
+            Write-Host 'Contenido de app.asar:'
+            $listado | ForEach-Object { Write-Host "  $_" }
+            Write-Error 'El HTML no quedo dentro de app.asar. Revisa build.files en package.json.'
+            exit 1
+          }
+          Write-Host 'HTML empaquetado correctamente:'
+          $encontrado | ForEach-Object { Write-Host "  $_" }
+
+      - name: Listar binarios generados
+        shell: pwsh
+        run: Get-ChildItem dist/*.exe | ForEach-Object { Write-Host ("{0}  ({1:N0} bytes)" -f $_.Name, $_.Length) }
 
       # Los .exe pesan ~100-200 MB cada uno. Subirlos ademas como artifacts
       # consume rapido la cuota de 500 MB del plan gratuito, asi que solo se
