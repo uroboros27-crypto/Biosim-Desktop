@@ -1,14 +1,18 @@
 name: Build Windows
 
 # Compila BioSim para Windows x64 en los runners de GitHub.
-#  - Manualmente: pestaña Actions -> "Build Windows" -> Run workflow.
-#  - Automaticamente: al empujar una etiqueta v* (p.ej. v7.2.1), ademas
-#    publica un Release con los .exe adjuntos.
 #
-# NOTA sobre la publicacion: electron-builder se ejecuta con --publish never
-# (ver package.json). La publicacion la hace UN SOLO paso, el de
-# softprops/action-gh-release al final. Si se deja que electron-builder
-# publique por su cuenta, exige GH_TOKEN y compiten por el mismo Release.
+#  - Etiqueta v* (p.ej. v7.2.1) -> Release definitivo con los .exe adjuntos.
+#  - Ejecucion manual (Actions -> Run workflow) -> Release de PRUEBA con la
+#    etiqueta fija "dev-build", que se sobrescribe en cada corrida.
+#
+# NOTA sobre almacenamiento: NO se usa actions/upload-artifact. Los artifacts
+# consumen la cuota de 500 MB del plan gratuito y cada corrida genera ~200 MB
+# entre el portable y el instalador, asi que se llenaba en dos o tres builds.
+# Los binarios adjuntos a un Release NO consumen esa cuota.
+#
+# NOTA sobre la publicacion: electron-builder corre con --publish never (ver
+# package.json). Publica un solo paso, el de softprops/action-gh-release.
 
 on:
   push:
@@ -73,22 +77,29 @@ jobs:
         shell: pwsh
         run: Get-ChildItem dist/*.exe | ForEach-Object { Write-Host ("{0}  ({1:N0} bytes)" -f $_.Name, $_.Length) }
 
-      # Los .exe pesan ~100-200 MB cada uno. Subirlos ademas como artifacts
-      # consume rapido la cuota de 500 MB del plan gratuito, asi que solo se
-      # hace en ejecuciones manuales y con caducidad corta. En etiquetas v*,
-      # los binarios van al Release, que no consume esa cuota.
-      - name: Upload build artifacts (solo ejecucion manual)
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v5
-        with:
-          name: BioSim-windows-x64
-          path: dist/*.exe
-          retention-days: 5
-          if-no-files-found: error
-
-      - name: Publish GitHub Release (solo en etiquetas v*)
+      # ── Release definitivo (solo al empujar una etiqueta v*) ──────────
+      - name: Publicar Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
           files: dist/*.exe
           generate_release_notes: true
+
+      # ── Release de prueba (ejecucion manual) ──────────────────────────
+      # Reutiliza siempre la misma etiqueta "dev-build": cada corrida
+      # sustituye los .exe anteriores, asi que no se acumula nada.
+      - name: Publicar build de prueba
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*.exe
+          tag_name: dev-build
+          name: 'BioSim — build de prueba'
+          body: |
+            Compilacion de prueba generada manualmente.
+            Commit: ${{ github.sha }}
+            Corrida: #${{ github.run_number }}
+
+            Se sobrescribe en cada ejecucion manual. Para una version
+            estable, usa los Releases etiquetados con v*.
+          prerelease: true
