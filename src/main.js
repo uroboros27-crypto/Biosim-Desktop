@@ -1,16 +1,55 @@
 // ════════════════════════════════════════════════════════════════════
 //  BioSim — proceso principal de Electron
-//  Envuelve la aplicación HTML autocontenida (app/BioSim_v6_8.html) en
-//  una ventana de escritorio. Electron empaqueta su propio Chromium, así
-//  que NO depende de WebView2 ni de ningún runtime preinstalado: corre en
-//  cualquier Windows 10+ x64 tal cual.
+//  Envuelve la aplicación HTML autocontenida en una ventana de escritorio.
+//  Electron empaqueta su propio Chromium, así que NO depende de WebView2
+//  ni de ningún runtime preinstalado: corre en cualquier Windows 10+ x64.
+//
+//  v7.2.1 — CAMBIOS FRENTE A LA VERSIÓN ANTERIOR
+//   1. La ruta del HTML ya NO está escrita a mano. Se descubre en tiempo
+//      de ejecución cualquier archivo «BioSim*.html» de la raíz. Así,
+//      renombrar o subir una versión nueva del simulador nunca vuelve a
+//      romper el ejecutable.
+//   2. Si no se encuentra ningún HTML, se muestra un diálogo explícito en
+//      vez de una ventana en blanco.
+//   3. Se añaden los switches de GPU: sin ellos, Chromium moderno se niega
+//      a crear contexto WebGL en equipos sin GPU compatible y BioSim se
+//      queda sin visor 3D ni geometría.
 // ════════════════════════════════════════════════════════════════════
 'use strict';
 
 const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
-const APP_HTML = path.join(__dirname, '..', 'BioSim_v6_8.html');
+// ── GPU / WebGL ──────────────────────────────────────────────────────
+// BioSim es una app Three.js: sin WebGL no hay nada que mostrar. Estos
+// switches permiten usar GPUs que Chromium tiene en lista negra y, como
+// último recurso, caer al renderizador por software (SwiftShader), que
+// desde Chromium 136 ya no se activa solo.
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-unsafe-swiftshader');
+
+// ── Localización del HTML de la aplicación ───────────────────────────
+const ROOT = path.join(__dirname, '..');
+
+function findAppHtml() {
+  // 1) Nombre canónico, si existe.
+  const canonical = path.join(ROOT, 'BioSim.html');
+  if (fs.existsSync(canonical)) return canonical;
+
+  // 2) Cualquier BioSim*.html; si hay varios, el de nombre mayor
+  //    (BioSim_v7_2 gana a BioSim_v6_8) para no servir una versión vieja.
+  let files = [];
+  try {
+    files = fs.readdirSync(ROOT).filter(f => /^BioSim.*\.html$/i.test(f));
+  } catch (e) { /* directorio ilegible */ }
+
+  if (files.length === 0) return null;
+  files.sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
+  return path.join(ROOT, files[0]);
+}
+
+const APP_HTML = findAppHtml();
 const APP_VERSION = app.getVersion();
 
 // Una sola instancia (evita abrir varias ventanas si se relanza el .exe)
@@ -45,6 +84,15 @@ function createMainWindow() {
   });
 
   win.once('ready-to-show', () => win.show());
+
+  // Si la carga del archivo falla, decirlo en vez de dejar la ventana muda.
+  win.webContents.on('did-fail-load', (e, code, desc, url) => {
+    dialog.showErrorBox(
+      'No se pudo cargar BioSim',
+      'Fallo al abrir:\n' + url + '\n\nCódigo ' + code + ': ' + desc
+    );
+  });
+
   win.loadFile(APP_HTML);
 
   // ── Manejo de ventanas emergentes ──────────────────────────────────
@@ -107,6 +155,24 @@ function buildMenu() {
       label: 'Ayuda',
       submenu: [
         {
+          label: 'Diagnóstico',
+          click: () => {
+            const gpu = app.getGPUFeatureStatus ? app.getGPUFeatureStatus() : {};
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Diagnóstico de BioSim',
+              message: 'Estado del entorno',
+              detail:
+                'HTML cargado:\n' + (APP_HTML || '(ninguno)') + '\n\n' +
+                'Electron ' + process.versions.electron +
+                ' · Chromium ' + process.versions.chrome + '\n\n' +
+                'WebGL: ' + (gpu.webgl || 'desconocido') + '\n' +
+                'Aceleración 2D: ' + (gpu['2d_canvas'] || 'desconocido'),
+              buttons: ['Cerrar']
+            });
+          }
+        },
+        {
           label: 'Acerca de BioSim',
           click: () => {
             dialog.showMessageBox({
@@ -129,6 +195,18 @@ function buildMenu() {
 }
 
 app.whenReady().then(() => {
+  if (!APP_HTML) {
+    dialog.showErrorBox(
+      'BioSim — archivo de aplicación no encontrado',
+      'No se encontró ningún archivo «BioSim*.html» junto al ejecutable.\n\n' +
+      'Buscado en:\n' + ROOT + '\n\n' +
+      'Revisa la lista "files" de package.json: debe incluir el HTML que ' +
+      'realmente está en el repositorio.'
+    );
+    app.quit();
+    return;
+  }
+
   buildMenu();
   createMainWindow();
 
