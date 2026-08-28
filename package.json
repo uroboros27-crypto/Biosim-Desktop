@@ -8,8 +8,8 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder --win --x64"
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --win --x64 --publish never"
   },
   "devDependencies": {
     "electron": "42.4.1",
