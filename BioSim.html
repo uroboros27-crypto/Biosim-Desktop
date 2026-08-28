@@ -6696,8 +6696,13 @@ function _updateToolBtns(){
 // ═══════════════════════════════════════
 function getSelectableMeshes(){
   // Solo los Mesh principales (isMesh=true) — excluir LineSegments de bordes
-  // y visualizaciones de plano de corte (userData._spViz)
-  return surfaces.filter(s=>s.mesh&&s.mesh.isMesh&&!s.mesh.userData._spViz).map(s=>s.mesh);
+  // y visualizaciones de plano de corte (userData._spViz).
+  // v7.2.2: el Raycaster de Three.js r128 NO comprueba object.visible, así que
+  // sin este filtro se podía hacer clic sobre geometría de zonas apagadas o
+  // bloqueadas. La regla de seleccionabilidad se aplica aquí también.
+  return surfaces
+    .filter(s => s.mesh && s.mesh.isMesh && !s.mesh.userData._spViz && isSurfaceSelectable(s))
+    .map(s => s.mesh);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -7395,11 +7400,14 @@ function updateCoords(px,py,w,h){
 
 function selectAll(){
   const before = sel.size;
+  let omitted = 0;
   surfaces.forEach(s => {
-    if(s.mesh && !isSurfaceLocked(s)) sel.add(s.id);
+    if(isSurfaceSelectable(s)) sel.add(s.id);
+    else if(s.mesh) omitted++;
   });
   updateSelVis(); renderZoneTree(); updateStatus();
-  log(`Seleccionadas ${sel.size} superficies (${sel.size - before} nuevas).`, 'ok');
+  log(`Seleccionadas ${sel.size} superficies (${sel.size - before} nuevas)` +
+      (omitted ? ` · ${omitted} omitida(s) por estar ocultas o bloqueadas.` : '.'), 'ok');
 }
 
 function clearSelection(){
@@ -7412,7 +7420,7 @@ function clearSelection(){
 function invertSelection(){
   const newSel = new Set();
   surfaces.forEach(s => {
-    if(s.mesh && !isSurfaceLocked(s) && !sel.has(s.id)) newSel.add(s.id);
+    if(isSurfaceSelectable(s) && !sel.has(s.id)) newSel.add(s.id);
   });
   sel.clear();
   newSel.forEach(id => sel.add(id));
@@ -7427,9 +7435,12 @@ function invertSelection(){
 function selectByTag(tag){
   const additive = window.event && (window.event.ctrlKey || window.event.shiftKey);
   if(!additive) sel.clear();
-  let added = 0;
+  let added = 0, omitted = 0;
   surfaces.forEach(s => {
-    if(!s.mesh || isSurfaceLocked(s)) return;
+    if(!isSurfaceSelectable(s)){
+      if(s.mesh && (s.tag || autoTag(s)) === tag) omitted++;
+      return;
+    }
     if((s.tag || autoTag(s)) === tag){
       if(!sel.has(s.id)){
         sel.add(s.id);
@@ -7440,12 +7451,13 @@ function selectByTag(tag){
   updateSelVis(); renderZoneTree(); updateStatus();
   const TAG_LBL = {muro:'muros', cubierta:'cubiertas', losa:'losas', piso:'pisos', ventana:'ventanas', puerta:'puertas', 'adiabática':'adiabáticas'};
   const lbl = TAG_LBL[tag] || tag;
+  const omitTxt = omitted ? ` · ${omitted} omitida(s) por estar en zonas ocultas o bloqueadas` : '';
   if(added > 0){
-    log(`Seleccionadas ${added} ${lbl}${additive ? ' (añadidas a selección)' : ''}.`, 'ok');
+    log(`Seleccionadas ${added} ${lbl}${additive ? ' (añadidas a selección)' : ''}${omitTxt}.`, 'ok');
   } else if(sel.size === 0){
-    log(`No se encontraron superficies con etiqueta "${tag}".`, 'warn');
+    log(`No se encontraron ${lbl} seleccionables${omitTxt || ' con esa etiqueta'}.`, 'warn');
   } else {
-    log(`No se añadieron nuevos ${lbl} (ya estaban seleccionadas o están bloqueadas).`, 'warn');
+    log(`No se añadieron nuevos ${lbl} (ya estaban seleccionados${omitTxt}).`, 'warn');
   }
 }
 
@@ -7453,9 +7465,9 @@ function selectByTag(tag){
 function selectByPartition(kind){
   const additive = window.event && (window.event.ctrlKey || window.event.shiftKey);
   if(!additive) sel.clear();
-  let added = 0;
+  let added = 0, omitted = 0;
   surfaces.forEach(s => {
-    if(!s.mesh || isSurfaceLocked(s)) return;
+    if(!isSurfaceSelectable(s)){ if(s.mesh) omitted++; return; }
     let match = false;
     if(kind === 'exterior')        match = s.exterior === true;
     else if(kind === 'shared')     match = s.partition === 'shared';
@@ -7468,12 +7480,13 @@ function selectByPartition(kind){
   updateSelVis(); renderZoneTree(); updateStatus();
   const KIND_LBL = {exterior:'exteriores', shared:'particiones compartidas', interior:'interiores simples'};
   const lbl = KIND_LBL[kind] || kind;
+  const omitTxt2 = omitted ? ` · ${omitted} omitida(s) por estar ocultas o bloqueadas` : '';
   if(added > 0){
-    log(`Seleccionadas ${added} superficies ${lbl}${additive ? ' (añadidas)' : ''}.`, 'ok');
+    log(`Seleccionadas ${added} superficies ${lbl}${additive ? ' (añadidas)' : ''}${omitTxt2}.`, 'ok');
   } else if(sel.size === 0){
-    log(`No se encontraron superficies ${lbl}.`, 'warn');
+    log(`No se encontraron superficies ${lbl} seleccionables${omitTxt2}.`, 'warn');
   } else {
-    log(`Selección sin cambios para "${lbl}".`, 'warn');
+    log(`Selección sin cambios para "${lbl}"${omitTxt2}.`, 'warn');
   }
 }
 
@@ -9749,8 +9762,14 @@ function toggleZoneVisible(id, e){
       if(s._edgeMesh) s._edgeMesh.visible = visible;
     }
   });
+  // Al apagar la zona, sacar sus superficies de la selección: dejarlas
+  // seleccionadas pero invisibles hacía que las ediciones múltiples las
+  // afectaran sin que el usuario pudiera verlas.
+  const expulsadas = _pruneSelection();
+  if(expulsadas > 0){ updateSelVis(); updateStatus(); _refreshPropsPanel(); }
   renderZoneTree();
-  log(`Zona "${z.name}": ${visible?'visible':'oculta'}`, visible?'ok':'warn');
+  log(`Zona "${z.name}": ${visible?'visible':'oculta'}` +
+      (expulsadas ? ` · ${expulsadas} superficie(s) salieron de la selección` : ''), visible?'ok':'warn');
 }
 
 // v6.0: helper para sincronizar la visibility de TODAS las zonas con sus meshes.
@@ -9777,6 +9796,57 @@ function _syncZoneVisibility(){
 function isZoneLocked(zid){
   const z = zones.find(x=>x.id===zid);
   return !!(z && z.locked);
+}
+
+// ─── VISIBILIDAD Y SELECCIONABILIDAD (v7.2.2) ────────────────────────
+// Antes, los comandos de selección masiva y el raycast del visor sólo
+// comprobaban el BLOQUEO. Una superficie de una zona apagada (o de una capa
+// apagada) seguía entrando en la selección aunque no se viera en pantalla,
+// de modo que "Seleccionar todos los muros" arrastraba geometría invisible
+// y las ediciones posteriores la afectaban sin que el usuario lo supiera.
+
+function isZoneHidden(zid){
+  const z = zones.find(x=>x.id===zid);
+  return !!(z && z._visible === false);
+}
+
+// ¿La superficie está oculta por su zona, por su capa, o por el mesh mismo?
+function isSurfaceHidden(surf){
+  if(!surf || !surf.mesh) return true;
+  if(surf.mesh.visible === false) return true;
+  if(isZoneHidden(surf.zoneId)) return true;
+  if(surf.layerId && typeof layers !== 'undefined'){
+    const l = layers.find(x=>x.id===surf.layerId);
+    if(l && l.visible === false) return true;
+  }
+  return false;
+}
+
+// Regla única para TODA la selección: visible y desbloqueada.
+function isSurfaceSelectable(surf){
+  return !!(surf && surf.mesh && !isSurfaceHidden(surf) && !isSurfaceLocked(surf));
+}
+
+// Repinta el panel derecho acorde al tamaño actual de la selección.
+function _refreshPropsPanel(){
+  if(sel.size === 1){
+    const s = surfaces.find(x => x.id === [...sel][0]);
+    if(s){ showSurfProps(s); return; }
+  }
+  showMultiSurfProps();
+}
+
+// Depura la selección actual: expulsa lo que haya dejado de ser
+// seleccionable (zona apagada o bloqueada después de seleccionar).
+// Devuelve cuántas superficies se expulsaron.
+function _pruneSelection(){
+  const drop = [];
+  sel.forEach(id => {
+    const s = surfaces.find(x=>x.id===id);
+    if(!s || !isSurfaceSelectable(s)) drop.push(id);
+  });
+  drop.forEach(id => sel.delete(id));
+  return drop.length;
 }
 
 // ¿Está bloqueada la superficie por estar en una zona bloqueada?
@@ -9831,7 +9901,7 @@ function toggleZoneLocked(id, e){
       }
     });
     toRemove.forEach(sid=>sel.delete(sid));
-    if(toRemove.length>0) updateSelVis();
+    if(toRemove.length>0){ updateSelVis(); _refreshPropsPanel(); }
   }
   renderZoneTree();
   updateStatus();
@@ -9839,6 +9909,16 @@ function toggleZoneLocked(id, e){
 }
 
 function selectSurf(id,e){
+  // v7.2.2: la lista del árbol de zonas usaba la misma ruta que el visor
+  // pero sin ninguna comprobación, así que permitía seleccionar superficies
+  // de zonas apagadas o bloqueadas.
+  const _s = surfaces.find(x=>x.id===id);
+  if(_s && !isSurfaceSelectable(_s)){
+    log(isSurfaceLocked(_s)
+      ? `🔒 "${_s.name}" está en una zona bloqueada — no se puede seleccionar.`
+      : `👁 "${_s.name}" está en una zona o capa apagada — enciéndela para seleccionarla.`, 'warn');
+    return;
+  }
   if(e&&(e.ctrlKey||e.shiftKey)){
     if(sel.has(id)) sel.delete(id); else sel.add(id);
   } else { sel.clear(); sel.add(id); }
@@ -9995,7 +10075,11 @@ function showSurfProps(surf){
 
   // Solo ir a rProp si la pestaña activa no es una válida
   const activeTab=document.querySelector('.rtab.act');
-  const validTabs=['rProp','rConst','rSolar'];
+  // v7.2.2: 'rLib' (biblioteca de materiales) faltaba en esta lista. Al estar
+  // el usuario en la pestaña MAT, cualquier cambio de selección — o cualquier
+  // edición múltiple, que repinta el panel — lo devolvía a Prop. Efecto
+  // observado: "no se puede desplegar la pestaña de materiales".
+  const validTabs=['rProp','rConst','rSolar','rLib'];
   const currentTabId=activeTab?.getAttribute('onclick')?.match(/showRTab\('(\w+)'\)/)?.[1];
   if(!currentTabId||!validTabs.includes(currentTabId)) showRTab('rProp');
 }
@@ -10217,9 +10301,41 @@ function showMultiSurfProps(){
 
   // Cambiar a la pestaña de propiedades si la activa no es válida
   const activeTab = document.querySelector('.rtab.act');
-  const validTabs = ['rProp','rConst','rSolar'];
+  // v7.2.2: 'rLib' (biblioteca de materiales) faltaba en esta lista. Al estar
+  // el usuario en la pestaña MAT, cualquier cambio de selección — o cualquier
+  // edición múltiple, que repinta el panel — lo devolvía a Prop. Efecto
+  // observado: "no se puede desplegar la pestaña de materiales".
+  const validTabs = ['rProp','rConst','rSolar','rLib'];
   const currentTabId = activeTab?.getAttribute('onclick')?.match(/showRTab\('(\w+)'\)/)?.[1];
   if(!currentTabId || !validTabs.includes(currentTabId)) showRTab('rProp');
+}
+
+
+// Bloque comun (v7.2.2): lista de materiales presentes en la seleccion con
+// un boton para eliminar todas sus capas de golpe. Se muestra en los dos
+// casos, tambien cuando las construcciones difieren — que es precisamente
+// cuando el editor capa-por-capa no esta disponible.
+function _matsInSelectionHTML(surfs){
+  const mats = _materialsInSelection(surfs);
+  if(mats.length === 0) return '';
+  let h = `<hr style="border-color:var(--border);margin:10px 0">
+    <div style="font-size:.62rem;color:var(--text2);font-weight:600;margin-bottom:5px">
+      Materiales presentes en la selección</div>
+    <div style="font-size:.55rem;color:var(--text3);margin-bottom:5px;line-height:1.5">
+      Elimina de una vez todas las capas de un material. Se omite cualquier
+      superficie que quedaría sin capas.</div>`;
+  mats.forEach(m => {
+    const mat = getMat(m.matId);
+    const nom = mat ? mat.name : m.matId;
+    h += `<div class="le-row">
+      <div style="flex:1;font-size:.62rem;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${nom}</div>
+      <span style="font-size:.53rem;color:var(--text3);flex-shrink:0">${m.capas} capa(s) · ${m.sups} sup.</span>
+      <button class="le-edit" onclick="openMatEditor('${m.matId}')" title="Editar propiedades del material">✏</button>
+      <button class="le-d" onclick="editLayerDeleteByMaterialMulti('${m.matId}')"
+        title="Eliminar todas las capas de ${nom} en la selección">✕</button>
+    </div>`;
+  });
+  return h;
 }
 
 // ─── Panel de construcciones en modo multi ────────────────────────────
@@ -10270,6 +10386,7 @@ function _renderMultiConstructions(surfs){
       html += `<div class="chip" style="margin-top:8px"><span class="cl">U media</span><span class="cv ${uCls}">${uMean.toFixed(3)} W/m²K</span></div>
         <div class="chip" style="margin-top:3px"><span class="cl">U rango</span><span class="cv">${uMin.toFixed(3)} – ${uMax.toFixed(3)}</span></div>`;
     }
+    html += _matsInSelectionHTML(surfs);
   } else {
     // ── CASO B: construcciones distintas → ofrecer sobrescribir ──────
     html += `<div style="font-size:.6rem;color:#a06820;background:rgba(255,180,80,0.10);border:1px solid rgba(255,180,80,0.4);border-radius:4px;padding:6px 8px;margin-bottom:8px;line-height:1.5">
@@ -10306,7 +10423,8 @@ function _renderMultiConstructions(surfs){
         </button>
       </div>`;
     });
-    html += `<div style="margin-top:6px;padding:5px 8px;background:rgba(80,80,80,0.08);border-radius:4px;font-size:.55rem;color:var(--text3);line-height:1.5">
+    html += _matsInSelectionHTML(surfs);
+    html += `<div style="margin-top:8px;padding:5px 8px;background:rgba(80,80,80,0.08);border-radius:4px;font-size:.55rem;color:var(--text3);line-height:1.5">
       Alternativa: deselecciona y trabaja por grupos homogéneos.
     </div>`;
   }
@@ -10321,6 +10439,7 @@ function editZoneMulti(zid){
   if(!zid) return;
   if(isZoneLocked(zid)){ log(`🔒 Zona destino bloqueada — no se admite trasladar superficies a ella.`,'warn'); return; }
   const {editable, locked} = _splitSelByLock();
+  if(editable.length>0) _undoPush();   // estado ANTES del cambio
   editable.forEach(s => {
     s.zoneId = zid;
     if(s.partition==='shared' && s.neighborZoneId===zid){
@@ -10329,39 +10448,34 @@ function editZoneMulti(zid){
   });
   colorZona(); renderZoneTree();
   showMultiSurfProps();
-  if(editable.length>0) _undoPush();
   _logMultiLockResult('Zona', editable.length, locked.length);
 }
 
 function editPartitionMulti(kind){
   if(!kind) return;
   const {editable, locked} = _splitSelByLock();
+  if(editable.length>0) _undoPush();   // estado ANTES del cambio
   editable.forEach(s => setSurfPartition(s.id, kind));
   showMultiSurfProps();
-  if(editable.length>0) _undoPush();
   _logMultiLockResult(`Tipo "${kind}"`, editable.length, locked.length);
 }
 
 function editNeighborMulti(zid){
   const {editable, locked} = _splitSelByLock();
+  const _cands = editable.filter(s => s.partition === 'shared' || getSurfPartitionKind(s) === 'shared');
+  if(_cands.length>0) _undoPush();   // estado ANTES del cambio
   let applied = 0;
-  editable.forEach(s => {
-    if(s.partition === 'shared' || getSurfPartitionKind(s) === 'shared'){
-      setSurfNeighbor(s.id, zid || null);
-      applied++;
-    }
-  });
+  _cands.forEach(s => { setSurfNeighbor(s.id, zid || null); applied++; });
   showMultiSurfProps();
-  if(applied>0) _undoPush();
   _logMultiLockResult(zid?'Zona vecina':'Zona vecina (limpiada)', applied, locked.length);
 }
 
 function editTagMulti(tag){
   if(!tag) return;
   const {editable, locked} = _splitSelByLock();
+  if(editable.length>0) _undoPush();   // estado ANTES del cambio
   editable.forEach(s => setSurfTag(s.id, tag));
   showMultiSurfProps();
-  if(editable.length>0) _undoPush();
   _logMultiLockResult(`Etiqueta "${tag}"`, editable.length, locked.length);
 }
 
@@ -10369,6 +10483,7 @@ function editRenameMulti(){
   const tpl = (document.getElementById('multiRenameTpl')?.value || '').trim();
   if(!tpl){ log('Escribe una plantilla. Usa {n} para insertar el número.','warn'); return; }
   const {editable, locked} = _splitSelByLock();
+  if(editable.length>0) _undoPush();   // estado ANTES del cambio
   // v4.5: paso 1 — limpiar nombres viejos para no auto-colisionar con nombres
   // recién aplicados (p. ej. si la plantilla {n} produce "Muro 1" y ya existía
   // "Muro 1" en una superficie editable que aún no ha sido procesada).
@@ -10381,12 +10496,13 @@ function editRenameMulti(){
   });
   renderZoneTree();
   showMultiSurfProps();
-  if(editable.length>0) _undoPush();
   _logMultiLockResult(`Renombrado con "${tpl}"`, editable.length, locked.length);
 }
 
 function editLayerMaterialMulti(li, matId){
   const {editable, locked} = _splitSelByLock();
+  if(editable.length===0){ log('🔒 Nada editable en la selección.','warn'); return; }
+  _undoPush();   // estado ANTES del cambio
   editable.forEach(s => {
     if(s.layers && s.layers[li]){
       s.layers[li].matId = matId;
@@ -10394,44 +10510,117 @@ function editLayerMaterialMulti(li, matId){
     }
   });
   showMultiSurfProps();
-  if(editable.length>0) _undoPush();
   _logMultiLockResult(`Material capa ${li+1}`, editable.length, locked.length);
 }
 
 function editLayerThicknessMulti(li, e){
   if(!isFinite(e) || e <= 0) return;
   const {editable, locked} = _splitSelByLock();
+  if(editable.length===0){ log('🔒 Nada editable en la selección.','warn'); return; }
+  _undoPush();   // estado ANTES del cambio
   editable.forEach(s => {
     if(s.layers && s.layers[li]) s.layers[li].e = e;
   });
   showMultiSurfProps();
-  if(editable.length>0) _undoPush();
   _logMultiLockResult(`Espesor capa ${li+1} = ${(e*1000).toFixed(0)} mm`, editable.length, locked.length);
 }
 
 function editLayerAddMulti(){
   const {editable, locked} = _splitSelByLock();
+  if(editable.length===0){ log('🔒 Nada editable en la selección — no se añadió ninguna capa.','warn'); return; }
+  _undoPush();   // estado ANTES del cambio
   editable.forEach(s => {
     if(!s.layers) s.layers = [];
     s.layers.push({matId:'MORT', e:0.015});
   });
   showMultiSurfProps();
-  if(editable.length>0) _undoPush();
   _logMultiLockResult('Capa añadida', editable.length, locked.length);
 }
 
 function editLayerDeleteMulti(li){
   const {editable, locked} = _splitSelByLock();
-  if(editable.some(s => !s.layers || s.layers.length <= 1)){
-    log('No se puede eliminar: alguna superficie quedaría sin capas.','warn');
+  if(editable.length === 0){
+    log('🔒 Todas las superficies seleccionadas están bloqueadas — ninguna capa eliminada.','warn');
     return;
   }
-  editable.forEach(s => {
-    if(s.layers && li < s.layers.length) s.layers.splice(li, 1);
+  // v7.2.2: antes, si UNA sola superficie tenía una capa, la operación se
+  // abortaba entera y el usuario veía el botón ✕ sin ningún efecto. Ahora se
+  // omite esa superficie y se eliminan las demás, informando de la omisión.
+  const aplicables = editable.filter(s => s.layers && s.layers.length > 1 && li < s.layers.length);
+  const omitidas   = editable.length - aplicables.length;
+  if(aplicables.length === 0){
+    log(`No se puede eliminar la capa ${li+1}: dejaría sin capas a todas las superficies seleccionadas.`,'warn');
+    return;
+  }
+  _undoPush();   // estado ANTES del cambio
+  aplicables.forEach(s => {
+    s.layers.splice(li, 1);
+    aplicarColorMaterial(s);
   });
   showMultiSurfProps();
-  if(editable.length>0) _undoPush();
-  _logMultiLockResult(`Capa ${li+1} eliminada`, editable.length, locked.length);
+  _logMultiLockResult(`Capa ${li+1} eliminada`, aplicables.length, locked.length);
+  if(omitidas > 0) log(`${omitidas} superficie(s) omitida(s): quedarían sin capas o no tienen esa capa.`,'warn');
+}
+
+// v7.2.2 — Eliminar TODAS las capas de un material dado en la selección.
+// Funciona aunque las superficies tengan construcciones distintas, que es
+// justo el caso en el que el editor capa-por-capa no está disponible.
+function editLayerDeleteByMaterialMulti(matId){
+  const {editable, locked} = _splitSelByLock();
+  if(editable.length === 0){
+    log('🔒 Todas las superficies seleccionadas están bloqueadas — nada eliminado.','warn');
+    return;
+  }
+  const mat = getMat(matId);
+  const nombreMat = mat ? mat.name : matId;
+
+  // Recuento previo, para confirmar con cifras reales y detectar el caso
+  // en que alguna superficie se quedaría sin ninguna capa.
+  let capasABorrar = 0, supAfectadas = 0, supOmitidas = 0;
+  editable.forEach(s => {
+    const ls = s.layers || [];
+    const hits = ls.filter(l => l.matId === matId).length;
+    if(hits === 0) return;
+    if(hits >= ls.length){ supOmitidas++; return; }   // la dejaría sin capas
+    capasABorrar += hits; supAfectadas++;
+  });
+
+  if(capasABorrar === 0){
+    log(supOmitidas > 0
+      ? `No se eliminó nada: "${nombreMat}" es la única capa de ${supOmitidas} superficie(s).`
+      : `Ninguna superficie seleccionada tiene capas de "${nombreMat}".`, 'warn');
+    return;
+  }
+  if(!confirm(`Eliminar ${capasABorrar} capa(s) de "${nombreMat}" en ${supAfectadas} superficie(s)?` +
+              (supOmitidas > 0 ? `\n\n${supOmitidas} superficie(s) se omitirán porque quedarían sin capas.` : ''))) return;
+
+  _undoPush();   // estado ANTES del cambio
+  editable.forEach(s => {
+    const ls = s.layers || [];
+    const hits = ls.filter(l => l.matId === matId).length;
+    if(hits === 0 || hits >= ls.length) return;
+    s.layers = ls.filter(l => l.matId !== matId);
+    aplicarColorMaterial(s);
+  });
+  showMultiSurfProps();
+  log(`Eliminadas ${capasABorrar} capa(s) de "${nombreMat}" en ${supAfectadas} superficie(s)` +
+      (supOmitidas ? ` · ${supOmitidas} omitida(s)` : '') +
+      (locked.length ? ` · 🔒 ${locked.length} bloqueada(s)` : '') + '.', 'ok');
+}
+
+// Devuelve los materiales presentes en la selección, con cuántas capas y
+// cuántas superficies los usan. Ordenado por frecuencia descendente.
+function _materialsInSelection(surfs){
+  const map = new Map();
+  surfs.forEach(s => {
+    const vistos = new Set();
+    (s.layers||[]).forEach(l => {
+      if(!map.has(l.matId)) map.set(l.matId, {matId:l.matId, capas:0, sups:0});
+      map.get(l.matId).capas++;
+      if(!vistos.has(l.matId)){ map.get(l.matId).sups++; vistos.add(l.matId); }
+    });
+  });
+  return [...map.values()].sort((a,b) => b.capas - a.capas);
 }
 
 // Copiar la construcción de una superficie (sourceId) a todas las seleccionadas
