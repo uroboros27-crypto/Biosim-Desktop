@@ -4150,6 +4150,10 @@ canvas#cv{display:block;}
       <a onclick="colorU()">🌡 Colorear por U-Value</a>
       <a onclick="colorMat()">🧱 Colorear por Material</a>
       <hr>
+      <a onclick="toggleNormalsViz()" title="Muestra una flecha por superficie en la dirección de su normal. Verde = hacia fuera del modelo, naranja = hacia dentro.">➤ Ver normales</a>
+      <a onclick="invertirNormalesSeleccion()" title="Invierte la normal de las superficies seleccionadas. La normal decide qué caras reciben sol, el factor de vista al cielo y la clasificación cubierta/losa.">⇅ Invertir normal de la selección</a>
+      <a onclick="restaurarNormalesSeleccion()" title="Devuelve la selección a la orientación de la geometría importada.">↺ Restaurar normales originales</a>
+      <hr>
       <a onclick="togOpacity()">◻ Transparente</a>
     </div>
   </div>
@@ -4190,6 +4194,8 @@ canvas#cv{display:block;}
       <a onclick="selectByPartition('exterior')">↗ Todas las exteriores</a>
       <a onclick="selectByPartition('shared')">⇄ Todas las particiones compartidas</a>
       <a onclick="selectByPartition('interior')">⬇ Todas las interiores</a>
+      <hr>
+      <a onclick="seleccionarNormalesSospechosas()" title="Selecciona las superficies exteriores que no ven nada de cielo — candidatas a tener la normal invertida. Requiere haber calculado la radiación.">🔎 Normales sospechosas</a>
     </div>
   </div>
   <div class="menu-item">Simulación
@@ -4872,15 +4878,44 @@ canvas#cv{display:block;}
         <!-- ── TOOLBAR ── -->
         <div style="display:flex;gap:4px;padding:5px 7px;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;align-items:center;background:var(--bg2)">
           <button class="btn btn-a btn-xs" id="bRadCalc" onclick="calcularRadiacion()" style="font-weight:700">☀ Calcular</button>
-          <select class="psel" id="radPeriod" style="font-size:.6rem" onchange="actualizarRadiacion()">
+          <!-- v7.2.4: periodo de análisis — anual, mensual, un día o un rango.
+               Todo se resuelve sumando el vector diario ya calculado. -->
+          <select class="psel" id="radMode" style="font-size:.6rem;width:74px"
+            title="Periodo sobre el que se acumula la radiación" onchange="radModeChanged()">
             <option value="anual">Anual</option>
-            <option value="0">Enero</option><option value="1">Febrero</option>
-            <option value="2">Marzo</option><option value="3">Abril</option>
-            <option value="4">Mayo</option><option value="5">Junio</option>
-            <option value="6">Julio</option><option value="7">Agosto</option>
-            <option value="8">Septiembre</option><option value="9">Octubre</option>
-            <option value="10">Noviembre</option><option value="11">Diciembre</option>
+            <option value="mes">Mensual</option>
+            <option value="dia">Un día</option>
+            <option value="rango">Rango</option>
           </select>
+
+          <span id="radMonthWrap" style="display:none">
+            <select class="psel" id="radMonth" style="font-size:.6rem" onchange="actualizarRadiacion()">
+              <option value="0">Enero</option><option value="1">Febrero</option>
+              <option value="2">Marzo</option><option value="3">Abril</option>
+              <option value="4">Mayo</option><option value="5">Junio</option>
+              <option value="6">Julio</option><option value="7">Agosto</option>
+              <option value="8">Septiembre</option><option value="9">Octubre</option>
+              <option value="10">Noviembre</option><option value="11">Diciembre</option>
+            </select>
+          </span>
+
+          <span id="radDayWrap" style="display:none;align-items:center;gap:3px;font-size:.58rem;color:var(--text3)">
+            <input type="text" id="radDay" value="06-21" placeholder="MM-DD" maxlength="5"
+              title="Día del año en formato MM-DD (p. ej. 06-21 = solsticio de junio)"
+              style="width:52px;font-size:.6rem;padding:1px 3px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text2);font-family:var(--font-mono)"
+              onchange="actualizarRadiacion()">
+          </span>
+
+          <span id="radRangeWrap" style="display:none;align-items:center;gap:3px;font-size:.58rem;color:var(--text3)">
+            <input type="text" id="radFrom" value="03-21" placeholder="MM-DD" maxlength="5"
+              title="Fecha inicial (MM-DD)"
+              style="width:52px;font-size:.6rem;padding:1px 3px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text2);font-family:var(--font-mono)"
+              onchange="actualizarRadiacion()">→
+            <input type="text" id="radTo" value="09-21" placeholder="MM-DD" maxlength="5"
+              title="Fecha final (MM-DD). Si es anterior a la inicial, se ordenan solas."
+              style="width:52px;font-size:.6rem;padding:1px 3px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text2);font-family:var(--font-mono)"
+              onchange="actualizarRadiacion()">
+          </span>
           <div style="display:flex;align-items:center;gap:3px;font-size:.58rem;color:var(--text3)">
             ρ<input type="number" id="radAlbedo" value="0.2" min="0" max="1" step="0.05"
               title="Albedo del suelo (0=negro, 1=blanco, 0.2=típico)"
@@ -4890,6 +4925,11 @@ canvas#cv{display:block;}
           <label style="display:flex;align-items:center;gap:3px;cursor:pointer;font-size:.6rem;color:var(--text2);padding:2px 5px;background:var(--bg3);border:1px solid var(--accent);border-radius:4px;font-weight:600">
             <input type="checkbox" id="radShowColor" onchange="toggleRadColormap(this.checked)" checked style="cursor:pointer">
             Falso-color 3D
+          </label>
+          <label style="display:flex;align-items:center;gap:3px;cursor:pointer;font-size:.6rem;color:var(--text2);padding:2px 5px;background:var(--bg3);border:1px solid var(--border);border-radius:4px"
+            title="Mide el factor de vista al cielo de cada superficie lanzando rayos contra la geometría (145 parches de Tregenza). Sin esto, la difusa y la reflejada suponen el hemisferio despejado aunque haya obstáculos delante.">
+            <input type="checkbox" id="radUseSVF" checked style="cursor:pointer" onchange="invalidateSVFCache()">
+            Vista al cielo
           </label>
           <button class="btn btn-g btn-xs" onclick="resetRadColormap()" title="Restaurar colores originales">↺</button>
           <button class="btn btn-g btn-xs" id="bRadPdfBtn" onclick="exportTabPDF('bRad','Radiación Solar Incidente — BioSim')">⬇ PDF</button>
@@ -4949,6 +4989,9 @@ canvas#cv{display:block;}
                 <div style="font-size:.6rem">3· Pulsa <b>☀ Calcular</b></div>
                 <div style="font-size:.55rem;margin-top:6px;color:var(--text3)">
                   I = DNI·cos(θ)·sf + DHI·(1+cosβ)/2 + GHI·ρ·(1−cosβ)/2
+                </div>
+                <div style="font-size:.52rem;margin-top:3px;color:var(--text3)">
+                  Cielo difuso <b>isótropo</b> (Liu–Jordan) · periodo: anual, mes, día o rango
                 </div>
               </div>
             </div>
@@ -7282,10 +7325,40 @@ function _triHitsRectNDC(ax,ay,bx,by,cx,cy, minX,minY,maxX,maxY){
   return false;
 }
 
+// ── Proyección clip-space con control de w (v7.2.4) ──────────────────
+// THREE.Vector3.project() divide por w SIN comprobar su signo. Para un punto
+// DETRÁS de la cámara w<0 y las coordenadas salen invertidas: geometría que
+// está a la espalda del observador aterrizaba dentro del recuadro y entraba
+// en la selección. Aquí conservamos w y marcamos esos vértices como no
+// proyectables.
+const _bsV4 = new THREE.Vector4();
+function _projectClip(vWorld, cam, out){
+  _bsV4.set(vWorld.x, vWorld.y, vWorld.z, 1)
+       .applyMatrix4(cam.matrixWorldInverse)
+       .applyMatrix4(cam.projectionMatrix);
+  const w = _bsV4.w;
+  // Cámara ortográfica: w === 1 siempre y todo punto es proyectable.
+  // Cámara perspectiva: w <= 0 ⇒ el punto está en o detrás del plano de cámara.
+  if(w <= 1e-6 && cam.isPerspectiveCamera){ out.behind = true; return out; }
+  out.behind = false;
+  out.x = _bsV4.x / w;
+  out.y = _bsV4.y / w;
+  out.z = _bsV4.z / w;
+  return out;
+}
+
 function boxSelect(e, pxL, pxT, pxW, pxH, crossing){
   if(!e.ctrlKey&&!e.shiftKey) sel.clear();
   const vc=document.getElementById('vc');
   const r=vc.getBoundingClientRect();
+
+  // v7.2.4: usar la cámara ACTIVA. Antes se proyectaba siempre contra la
+  // cámara en perspectiva `camera`; en vistas ortográficas (planta, alzados,
+  // sección) la proyección no correspondía a lo que el usuario veía y el
+  // recuadro capturaba superficies arbitrarias fuera del área marcada.
+  const cam = (typeof activeCamera === 'function') ? activeCamera() : camera;
+  cam.updateMatrixWorld();
+  if(cam.matrixWorldInverse) cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
 
   // Prefer explicitly passed px values (reliable) over DOM style (may lag)
   const L = pxL !== undefined ? pxL : parseFloat(document.getElementById('selRect').style.left)||0;
@@ -7299,12 +7372,23 @@ function boxSelect(e, pxL, pxT, pxW, pxH, crossing){
   const ndcMinX=Math.min(x1,x2), ndcMaxX=Math.max(x1,x2);
   const ndcMinY=Math.min(y1,y2), ndcMaxY=Math.max(y1,y2);
 
-  // Reusable projected vertex vector
   const vWorld = new THREE.Vector3();
-  const vNDC   = new THREE.Vector3();
+  const pA = {x:0,y:0,z:0,behind:false};
+  const pB = {x:0,y:0,z:0,behind:false};
+  const pC = {x:0,y:0,z:0,behind:false};
 
+  // ¿Hay plano de corte activo? Entonces el recuadro debe ignorar lo que el
+  // plano oculta, igual que hace el clic simple.
+  const _clipping = typeof sectionPlanes !== 'undefined' && sectionPlanes.some(p=>p.active);
+  const _visiblePt = (v) => !_clipping || (typeof _spPointIsVisible!=='function') || _spPointIsVisible(v);
+
+  let omitidas = 0;
   surfaces.forEach(s=>{
     if(!s.mesh||!s.mesh.geometry) return;
+    // v7.2.4: la misma regla que el resto de la app — nada oculto ni
+    // bloqueado entra en la selección. Sin esto, un recuadro sobre la fachada
+    // arrastraba también la geometría de zonas apagadas que hay detrás.
+    if(!isSurfaceSelectable(s)){ omitidas++; return; }
     const pos = s.mesh.geometry.attributes.position;
     if(!pos||pos.count===0) return;
 
@@ -7315,12 +7399,17 @@ function boxSelect(e, pxL, pxT, pxW, pxH, crossing){
       for(let i=0; i<pos.count; i++){
         vWorld.fromBufferAttribute(pos, i);
         s.mesh.localToWorld(vWorld);
-        vNDC.copy(vWorld).project(camera);
-        if(vNDC.x < ndcMinX || vNDC.x > ndcMaxX ||
-           vNDC.y < ndcMinY || vNDC.y > ndcMaxY){
+        _projectClip(vWorld, cam, pA);
+        // Un solo vértice a la espalda de la cámara invalida la superficie
+        // completa: no puede estar "totalmente contenida" en el recuadro.
+        if(pA.behind){ allInside = false; break; }
+        if(pA.x < ndcMinX || pA.x > ndcMaxX ||
+           pA.y < ndcMinY || pA.y > ndcMaxY ||
+           pA.z < -1      || pA.z > 1){
           allInside = false;
           break;
         }
+        if(!_visiblePt(vWorld)){ allInside = false; break; }
       }
       if(allInside) sel.add(s.id);
     } else {
@@ -7329,27 +7418,30 @@ function boxSelect(e, pxL, pxT, pxW, pxH, crossing){
       const idxAttr = s.mesh.geometry.index;
       const triCount = idxAttr ? Math.floor(idxAttr.count/3) : Math.floor(pos.count/3);
       const gi = (t,e2)=> idxAttr ? idxAttr.getX(t*3+e2) : (t*3+e2);
-      const a=new THREE.Vector3(), b=new THREE.Vector3(), c=new THREE.Vector3();
+      const wa=new THREE.Vector3(), wb=new THREE.Vector3(), wc=new THREE.Vector3();
       let hit=false;
       for(let t=0; t<triCount && !hit; t++){
-        a.fromBufferAttribute(pos, gi(t,0)); s.mesh.localToWorld(a); a.project(camera);
-        b.fromBufferAttribute(pos, gi(t,1)); s.mesh.localToWorld(b); b.project(camera);
-        c.fromBufferAttribute(pos, gi(t,2)); s.mesh.localToWorld(c); c.project(camera);
-        if(_triHitsRectNDC(a.x,a.y, b.x,b.y, c.x,c.y, ndcMinX,ndcMinY,ndcMaxX,ndcMaxY)) hit=true;
+        wa.fromBufferAttribute(pos, gi(t,0)); s.mesh.localToWorld(wa); _projectClip(wa, cam, pA);
+        wb.fromBufferAttribute(pos, gi(t,1)); s.mesh.localToWorld(wb); _projectClip(wb, cam, pB);
+        wc.fromBufferAttribute(pos, gi(t,2)); s.mesh.localToWorld(wc); _projectClip(wc, cam, pC);
+        // Triángulo con algún vértice detrás de la cámara: se descarta.
+        // (Recortarlo contra el plano de cámara sería lo exacto, pero para
+        // un triángulo de fachada el caso solo se da cuando ya está fuera
+        // de la vista.)
+        if(pA.behind || pB.behind || pC.behind) continue;
+        // Fuera del frustum en profundidad: no es visible, no se selecciona.
+        if((pA.z<-1&&pB.z<-1&&pC.z<-1) || (pA.z>1&&pB.z>1&&pC.z>1)) continue;
+        if(_clipping && !_visiblePt(wa) && !_visiblePt(wb) && !_visiblePt(wc)) continue;
+        if(_triHitsRectNDC(pA.x,pA.y, pB.x,pB.y, pC.x,pC.y, ndcMinX,ndcMinY,ndcMaxX,ndcMaxY)) hit=true;
       }
       if(hit) sel.add(s.id);
     }
   });
 
   updateSelVis(); renderZoneTree(); updateStatus();
-  // Actualizar panel de propiedades según el resultado de la selección
-  if(sel.size > 1){
-    showMultiSurfProps();
-  } else if(sel.size === 1){
-    const onlyId = [...sel][0];
-    const s = surfaces.find(x => x.id === onlyId);
-    if(s) showSurfProps(s);
-  }
+  _refreshPropsPanel();
+  log(`Recuadro ${crossing?'de cruce':'de ventana'}: ${sel.size} superficie(s) seleccionada(s)` +
+      (omitidas ? ` · ${omitidas} ignorada(s) por estar ocultas o bloqueadas` : '') + '.', 'ok');
 }
 
 // Raycast contra el plano de dibujo de la vista activa
@@ -9754,6 +9846,16 @@ function toggleZoneMode(id){
   // Toggle between T (thermal) and S (shader-only). Both always cast shadows.
   z.thermal = !z.thermal;
   z.shader  = true;  // always shader regardless
+  // v7.3: al convertir en T, la zona pasa a ser construcción real y por
+  // tanto opaca. Se conserva el valor por si el usuario vuelve a S, pero
+  // zoneTau() lo ignora mientras thermal===true.
+  if(z.thermal && z.transmissivity > 0){
+    log(`Zona "${z.name}" ahora es Térmica (T): su transmisividad (${(z.transmissivity*100).toFixed(0)}%) queda inactiva — las zonas T son siempre opacas.`,'warn');
+  }
+  invalidateShadowCache();
+  invalidateSVFCache();
+  // Repintar el panel de zona: las pestañas disponibles cambian con el tipo
+  if(document.getElementById('rZoneContent')?.innerHTML.includes(z.id)) showZoneProps(z.id);
   invalidateShadowCache();
   renderZoneTree();
   log(`Zona "${z.name}": ${z.thermal?'Térmica (T)':'Shader (S)'}`, z.thermal?'ok':'warn');
@@ -9816,6 +9918,224 @@ function isZoneLocked(zid){
 // apagada) seguía entrando en la selección aunque no se viera en pantalla,
 // de modo que "Seleccionar todos los muros" arrastraba geometría invisible
 // y las ediciones posteriores la afectaban sin que el usuario lo supiera.
+
+// ── Visualización de normales (v7.3) ───────────────────────────────────
+// Dibuja una flecha por superficie desde su centroide en la dirección de su
+// normal. Se colorea según un test de plausibilidad: verde si apunta hacia
+// fuera del centro del modelo, naranja si apunta hacia dentro. El naranja no
+// es necesariamente un error (patios, voladizos), pero señala dónde mirar.
+let _normalsVizOn = false;
+let _normalsVizGroup = null;
+
+function _modelCenter(){
+  const b = new THREE.Box3();
+  surfaces.forEach(s => { if(s.mesh && s.mesh.visible) b.expandByObject(s.mesh); });
+  const c = new THREE.Vector3();
+  if(b.isEmpty()) return c;
+  b.getCenter(c);
+  return c;
+}
+
+function _refreshNormalsViz(){
+  if(_normalsVizGroup){
+    _normalsVizGroup.parent?.remove(_normalsVizGroup);
+    _normalsVizGroup.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+    _normalsVizGroup = null;
+  }
+  if(!_normalsVizOn) return;
+
+  const centro = _modelCenter();
+  const outPts = [], inPts = [];
+  // Longitud proporcional al tamaño del modelo, acotada para que se lea.
+  const box = new THREE.Box3();
+  surfaces.forEach(s => { if(s.mesh && s.mesh.visible) box.expandByObject(s.mesh); });
+  const diag = box.isEmpty() ? 10 : box.min.distanceTo(box.max);
+  const LEN = Math.max(0.3, Math.min(2.0, diag * 0.02));
+
+  surfaces.forEach(s => {
+    if(!s.mesh || !s.mesh.visible) return;
+    const cn = surfaceCentroidNormal(s);
+    if(!cn) return;
+    const a = cn.centroid.clone();
+    const b2 = a.clone().addScaledVector(cn.normal, LEN);
+    // ¿Apunta hacia fuera del centro del modelo?
+    const haciaFuera = cn.normal.dot(a.clone().sub(centro)) >= 0;
+    const dst = haciaFuera ? outPts : inPts;
+    dst.push(a.x,a.y,a.z, b2.x,b2.y,b2.z);
+    // Punta: dos trazos cortos hacia atrás
+    const back = b2.clone().addScaledVector(cn.normal, -LEN*0.28);
+    const perp = new THREE.Vector3(0,1,0);
+    if(Math.abs(cn.normal.y) > 0.9) perp.set(1,0,0);
+    const lat = new THREE.Vector3().crossVectors(cn.normal, perp).normalize().multiplyScalar(LEN*0.13);
+    dst.push(b2.x,b2.y,b2.z, back.x+lat.x, back.y+lat.y, back.z+lat.z);
+    dst.push(b2.x,b2.y,b2.z, back.x-lat.x, back.y-lat.y, back.z-lat.z);
+  });
+
+  _normalsVizGroup = new THREE.Group();
+  _normalsVizGroup.name = '__normalsViz__';
+  const mk = (pts, color) => {
+    if(!pts.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    _normalsVizGroup.add(new THREE.LineSegments(g,
+      new THREE.LineBasicMaterial({color, depthTest:false, transparent:true, opacity:0.95, fog:false})));
+  };
+  mk(outPts, 0x2f9e5a);   // verde — hacia fuera
+  mk(inPts,  0xd4761a);   // naranja — hacia dentro
+  _normalsVizGroup.renderOrder = 3;
+  (typeof getOrCreateRoot === 'function' ? getOrCreateRoot() : scene).add(_normalsVizGroup);
+}
+
+function toggleNormalsViz(){
+  _normalsVizOn = !_normalsVizOn;
+  _refreshNormalsViz();
+  const dentro = _normalsVizGroup?.children?.[1] ? 'naranja = apunta hacia el interior del modelo' : '';
+  log(`Normales: ${_normalsVizOn ? 'visibles — verde = hacia fuera, ' + (dentro || 'sin normales hacia dentro') : 'ocultas'}.`,
+      _normalsVizOn ? 'ok' : 'warn');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  INVERSIÓN DE NORMALES (v7.3)
+//
+//  La normal decide casi todo en el motor: qué caras reciben sol (descarte
+//  de caras traseras), el factor de vista al cielo, la clasificación
+//  automática cubierta/losa, y el signo de los flujos de la envolvente.
+//  Una normal del revés deja la superficie a oscuras sin ningún aviso.
+//
+//  No se toca la geometría: se guarda una marca `normalFlip` por superficie
+//  que surfaceCentroidNormal() aplica al final. Es reversible, se guarda en
+//  el .bio y no altera los vértices ni el orden de los índices.
+// ═══════════════════════════════════════════════════════════════════════
+
+function _flipOneSurface(s){
+  s.normalFlip = !s.normalFlip;
+  // La etiqueta automática depende de la normal: una cara que era cubierta
+  // pasa a ser losa al invertirse. Solo se recalcula si el usuario no había
+  // fijado la etiqueta a mano.
+  if(!s.tag && typeof aplicarColorMaterial === 'function') aplicarColorMaterial(s);
+  return s.normalFlip;
+}
+
+// Invierte la normal de todas las superficies seleccionadas.
+function invertirNormalesSeleccion(){
+  const {editable, locked} = _splitSelByLock();
+  if(editable.length === 0){
+    log(sel.size === 0
+      ? 'Selecciona al menos una superficie para invertir su normal.'
+      : '🔒 Todas las superficies seleccionadas están en zonas bloqueadas.', 'warn');
+    return;
+  }
+  _undoPush();   // estado ANTES del cambio
+  editable.forEach(_flipOneSurface);
+
+  invalidateShadowCache();
+  invalidateSVFCache();
+  if(typeof _refreshNormalsViz === 'function') _refreshNormalsViz();
+  renderZoneTree();
+  _refreshPropsPanel();
+
+  const invertidas = editable.filter(s => s.normalFlip).length;
+  _logMultiLockResult('Normal invertida', editable.length, locked.length);
+  log(`${invertidas} de ${editable.length} superficie(s) quedan ahora con la normal invertida respecto a la geometría importada. ` +
+      `Vuelve a calcular sombras y radiación para ver el efecto.`, 'ok');
+}
+
+// Invierte una sola superficie (botón del panel de propiedades).
+function invertirNormalSurf(sid){
+  const s = surfaces.find(x => x.id === sid);
+  if(!s) return;
+  if(isSurfaceLocked(s)){ log(`🔒 "${s.name}" está en zona bloqueada — normal no invertida.`,'warn'); return; }
+  _undoPush();
+  _flipOneSurface(s);
+  invalidateShadowCache();
+  invalidateSVFCache();
+  if(typeof _refreshNormalsViz === 'function') _refreshNormalsViz();
+  renderZoneTree();
+  showSurfProps(s);
+  log(`"${s.name}": normal ${s.normalFlip ? 'invertida' : 'restaurada a la de la geometría'}. ` +
+      `Recalcula sombras y radiación para ver el efecto.`, 'ok');
+}
+
+// Restaura la orientación original de la selección.
+function restaurarNormalesSeleccion(){
+  const {editable, locked} = _splitSelByLock();
+  const cambiadas = editable.filter(s => s.normalFlip);
+  if(cambiadas.length === 0){ log('Ninguna superficie de la selección tenía la normal invertida.','warn'); return; }
+  _undoPush();
+  cambiadas.forEach(s => { s.normalFlip = false; if(!s.tag) aplicarColorMaterial(s); });
+  invalidateShadowCache(); invalidateSVFCache();
+  if(typeof _refreshNormalsViz === 'function') _refreshNormalsViz();
+  renderZoneTree(); _refreshPropsPanel();
+  log(`${cambiadas.length} superficie(s) devueltas a la orientación de la geometría original.`,'ok');
+}
+
+// Selecciona las superficies exteriores que no ven nada de cielo: son las
+// candidatas a tener la normal del revés. Requiere haber calculado la
+// radiación al menos una vez (es donde se construye el caché de SVF).
+function seleccionarNormalesSospechosas(){
+  if(!_svfCache || !_svfCache.size){
+    log('Calcula primero la radiación (☀ Calcular) — el diagnóstico usa el factor de vista al cielo.','warn');
+    return;
+  }
+  sel.clear();
+  let n = 0;
+  _svfCache.forEach((v, id) => {
+    if(v.skyFrac <= 0.001){
+      const s = surfaces.find(x => x.id === id);
+      if(s && isSurfaceSelectable(s)){ sel.add(id); n++; }
+    }
+  });
+  updateSelVis(); renderZoneTree(); updateStatus(); _refreshPropsPanel();
+  if(n === 0){ log('Ninguna superficie exterior está totalmente ciega al cielo.','ok'); return; }
+  log(`${n} superficie(s) exteriores no ven nada de cielo. Puede ser normal invertida o una cara interior ` +
+      `marcada como exterior. Revísalas en el visor antes de invertirlas en bloque.`, 'warn');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  TRANSMISIVIDAD DE ZONAS DE SOMBRA (v7.3)
+//  Una zona marcada como S (shader) puede no ser completamente opaca:
+//  vegetación, celosías, mallas, pérgolas, textiles tensados. τ es la
+//  fracción de radiación que la atraviesa: 0 = opaca, 1 = invisible.
+//
+//  CONVENCIÓN DE APLICACIÓN: τ se aplica UNA VEZ por volumen de sombra
+//  atravesado, no una vez por cara. Un rayo que cruza una copa modelada
+//  como sólido cerrado entra y sale por dos caras, pero recibe τ una sola
+//  vez. Así el valor que el usuario escribe es el que ve en el resultado.
+//  Rayos que cruzan dos zonas S distintas sí acumulan: τ₁·τ₂.
+//
+//  Solo tiene efecto en zonas S. Una zona T es siempre opaca: representa
+//  construcción real, y dejarla transmitir falsearía el balance térmico.
+// ═══════════════════════════════════════════════════════════════════════
+const ZONE_TAU_DEFAULT = 0;   // opaca
+
+// τ efectivo de una zona: 0 si es térmica o no existe.
+function zoneTau(zid){
+  const z = zones.find(x => x.id === zid);
+  if(!z) return 0;
+  if(z.thermal) return 0;                    // zona T ⇒ siempre opaca
+  const t = z.transmissivity;
+  if(t === undefined || t === null) return ZONE_TAU_DEFAULT;
+  return Math.max(0, Math.min(1, +t || 0));
+}
+
+// ¿La zona admite configuración de sombra? (es S y no T)
+function isShadeZone(zid){
+  const z = zones.find(x => x.id === zid);
+  return !!(z && !z.thermal);
+}
+
+function setZoneTau(zid, val){
+  const z = zones.find(x => x.id === zid);
+  if(!z) return;
+  if(z.thermal){ log('La transmisividad solo aplica a zonas de sombra (S).','warn'); return; }
+  z.transmissivity = Math.max(0, Math.min(1, +val || 0));
+  invalidateShadowCache();
+  const el = document.getElementById('zTauVal_' + zid);
+  if(el) el.textContent = (z.transmissivity*100).toFixed(0) + '%';
+  log(`Zona "${z.name}": transmisividad ${(z.transmissivity*100).toFixed(0)}% ` +
+      `(${z.transmissivity === 0 ? 'opaca' : 'deja pasar ' + (z.transmissivity*100).toFixed(0) + '% de la radiación'}). ` +
+      `Recalcula sombras y radiación para ver el efecto.`, 'ok');
+}
 
 function isZoneHidden(zid){
   const z = zones.find(x=>x.id===zid);
@@ -10024,6 +10344,22 @@ function showSurfProps(surf){
       </div>`;
       })() : ''}</div>
     <div class="prow"><div class="plbl">Área</div><div class="pval">${surf.area.toFixed(3)} m²</div></div>
+    <div class="prow">
+      <div class="plbl" title="La normal decide qué cara recibe el sol, el factor de vista al cielo y la clasificación cubierta/losa. Si la superficie aparece siempre en sombra o mal etiquetada, prueba a invertirla.">Normal ℹ</div>
+      <div class="pval" style="display:flex;align-items:center;gap:5px">
+        <span style="font-family:var(--font-mono);font-size:.62rem;color:${(()=>{const c=surfaceCentroidNormal(surf);return c?'var(--text2)':'var(--text3)'})()}">${(()=>{
+          const c = surfaceCentroidNormal(surf);
+          if(!c) return '—';
+          const nx = c.normal;
+          const az = (Math.atan2(nx.x, -nx.z)*180/Math.PI + 360) % 360;
+          const alt = Math.asin(Math.max(-1,Math.min(1,nx.y)))*180/Math.PI;
+          return `${spAzDir(az)} ${az.toFixed(0)}° · ${alt>=0?'+':''}${alt.toFixed(0)}°`;
+        })()}</span>
+        ${surf.normalFlip ? '<span style="font-size:.52rem;color:var(--warn)" title="Invertida respecto a la geometría importada">⇅ inv.</span>' : ''}
+        <button class="btn btn-g btn-xs" style="margin-left:auto;padding:2px 7px;font-size:.55rem"
+          onclick="invertirNormalSurf('${surf.id}')" title="Invertir la normal de esta superficie">⇅ Invertir</button>
+      </div>
+    </div>
     <hr style="border-color:var(--border);margin:8px 0">
     <div class="plbl" style="margin-bottom:6px">PARÁMETROS DINÁMICOS</div>
     <div class="chips-grid">
@@ -10292,6 +10628,18 @@ function showMultiSurfProps(){
       </select></div>
 
     <div class="prow"><div class="plbl">Área total</div><div class="pval">${totalArea.toFixed(3)} m²</div></div>
+
+    <div class="prow">
+      <div class="plbl" title="Invierte la normal de las ${surfs.length} superficies seleccionadas. Afecta al descarte de caras traseras, al factor de vista al cielo y a la etiqueta automática.">Normales ℹ</div>
+      <div class="pval" style="display:flex;align-items:center;gap:4px">
+        <span style="font-size:.55rem;color:var(--text3)">${surfs.filter(s=>s.normalFlip).length} de ${surfs.length} invertidas</span>
+        <button class="btn btn-g btn-xs" style="margin-left:auto;padding:2px 7px;font-size:.55rem"
+          onclick="invertirNormalesSeleccion()" title="Invertir la normal de toda la selección">⇅ Invertir</button>
+        <button class="btn btn-g btn-xs" style="padding:2px 7px;font-size:.55rem"
+          onclick="restaurarNormalesSeleccion()" title="Volver a la orientación de la geometría importada">↺</button>
+      </div>
+    </div>
+
     <hr style="border-color:var(--border);margin:8px 0">
     <div class="plbl" style="margin-bottom:6px">PARÁMETROS AGREGADOS</div>
     <div class="chips-grid">
@@ -13608,21 +13956,38 @@ function ensureZoneLoads(z){
 
 function showZoneProps(zid){
   const z=zones.find(x=>x.id===zid); if(!z) return;
+  // v7.3: una zona S no tiene cargas. Se siguen inicializando por si el
+  // usuario la convierte en T más adelante, pero no se muestran.
   ensureZoneLoads(z);
+  const esT = z.thermal === true;
   const L=z._loads;
   const ss=surfaces.filter(s=>s.zoneId===zid);
   const aT=ss.reduce((a,s)=>a+s.area,0);
 
   document.getElementById('rZoneContent').innerHTML=`
-  <!-- Pestaña selector dentro de zona -->
+  <!-- v7.3: las pestañas dependen del tipo de zona. Una zona S (sombra) no
+       tiene ocupación, cargas internas, ventilación ni horarios: no es un
+       espacio habitable, es geometría que proyecta sombra. Mostrar esos
+       campos invitaba a rellenar datos que el motor ignora. -->
   <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:8px">
     <div class="ztab act" onclick="showZoneTab('ztGeneral','${z.id}',this)">General</div>
+    ${esT ? `
     <div class="ztab" onclick="showZoneTab('ztLoads','${z.id}',this)">Cargas</div>
     <div class="ztab" onclick="showZoneTab('ztVent','${z.id}',this)">Ventil.</div>
-    <div class="ztab" onclick="showZoneTab('ztSched','${z.id}',this)">Horarios</div>
+    <div class="ztab" onclick="showZoneTab('ztSched','${z.id}',this)">Horarios</div>`
+    : `
+    <div class="ztab" onclick="showZoneTab('ztShade','${z.id}',this)">Sombra</div>`}
   </div>
   <!-- General -->
   <div id="ztGeneral">
+    <div style="display:flex;align-items:center;gap:6px;padding:5px 8px;margin-bottom:7px;border-radius:5px;
+      background:${esT?'rgba(80,140,200,0.10)':'rgba(150,120,60,0.10)'};
+      border:1px solid ${esT?'rgba(80,140,200,0.35)':'rgba(150,120,60,0.35)'}">
+      <span style="font-weight:700;font-size:.68rem;color:${esT?'#3a6f9f':'#8a6a2a'}">${esT?'T · Zona térmica':'S · Zona de sombra'}</span>
+      <span style="font-size:.55rem;color:var(--text3);line-height:1.4">${esT
+        ? 'Entra en el balance térmico y en el análisis de radiación.'
+        : 'Solo proyecta sombra. No participa en el balance térmico.'}</span>
+    </div>
     <div class="prow"><div class="plbl">Nombre</div>
       <input class="pinp" value="${z.name}" onchange="zones.find(x=>x.id==='${z.id}').name=this.value;renderZoneTree()"></div>
     <div class="prow"><div class="plbl">Color</div>
@@ -13639,7 +14004,47 @@ function showZoneProps(zid){
     <button class="btn btn-g btn-sm" style="width:100%;margin-bottom:4px" onclick="activeZone='${z.id}';selZona()">☑ Seleccionar todas</button>
     <button class="btn btn-d btn-sm" style="width:100%" onclick="deleteZone('${z.id}')">✕ Eliminar zona</button>
   </div>
+  <!-- v7.3: Sombra — solo zonas S -->
+  ${esT ? '' : `
+  <div id="ztShade" class="h">
+    <div class="section-hdr">🌳 Transmisividad</div>
+    <div style="font-size:.62rem;color:var(--text2);line-height:1.6;margin-bottom:9px;padding:7px 9px;background:rgba(150,120,60,0.07);border-left:3px solid rgba(150,120,60,.5);border-radius:4px">
+      Fracción de radiación solar que <b>atraviesa</b> esta zona. Sirve para
+      vegetación y para cualquier elemento de sombra no opaco: celosías, mallas,
+      pérgolas, textiles, paneles perforados.
+      <div style="margin-top:5px;color:var(--text3)">
+        Se aplica <b>una vez por volumen atravesado</b>, no una vez por cara.
+        Afecta a la radiación directa, a la difusa y al factor de vista al cielo.
+      </div>
+    </div>
+    <div class="prow">
+      <div class="plbl">τ transmisividad</div>
+      <input type="range" min="0" max="1" step="0.05" value="${zoneTau(z.id)}"
+        style="flex:1;cursor:pointer"
+        oninput="document.getElementById('zTauVal_${z.id}').textContent=(this.value*100).toFixed(0)+'%'"
+        onchange="setZoneTau('${z.id}', this.value)">
+      <span id="zTauVal_${z.id}" style="min-width:34px;text-align:right;font-family:var(--font-mono);font-size:.66rem;color:var(--accent)">${(zoneTau(z.id)*100).toFixed(0)}%</span>
+    </div>
+    <div style="display:flex;gap:3px;flex-wrap:wrap;margin:7px 0 10px">
+      <button class="btn btn-g btn-xs" onclick="setZoneTau('${z.id}',0);showZoneProps('${z.id}');showZoneTab('ztShade','${z.id}',document.querySelectorAll('#rZoneContent .ztab')[1])" title="Muro, edificio vecino, panel macizo">0 % opaca</button>
+      <button class="btn btn-g btn-xs" onclick="setZoneTau('${z.id}',0.15);showZoneProps('${z.id}');showZoneTab('ztShade','${z.id}',document.querySelectorAll('#rZoneContent .ztab')[1])" title="Follaje perenne denso">15 % densa</button>
+      <button class="btn btn-g btn-xs" onclick="setZoneTau('${z.id}',0.30);showZoneProps('${z.id}');showZoneTab('ztShade','${z.id}',document.querySelectorAll('#rZoneContent .ztab')[1])" title="Árbol de hoja media, celosía cerrada">30 % media</button>
+      <button class="btn btn-g btn-xs" onclick="setZoneTau('${z.id}',0.50);showZoneProps('${z.id}');showZoneTab('ztShade','${z.id}',document.querySelectorAll('#rZoneContent .ztab')[1])" title="Malla de sombreo, pérgola de listones, árbol caducifolio sin hoja">50 % ligera</button>
+    </div>
+    <div style="font-size:.58rem;color:var(--text3);line-height:1.6;border-top:1px solid var(--border);padding-top:7px">
+      <b style="color:var(--text2)">Valores de referencia.</b>
+      Follaje perenne denso 0,10–0,20 · árbol de hoja media 0,25–0,35 ·
+      caducifolio en invierno 0,50–0,70 · malla de sombreo 30 % 0,30 ·
+      celosía de listones según su relación hueco/lleno.
+      <div style="margin-top:5px">
+        Cambiar τ invalida el caché de sombras: vuelve a pulsar
+        <b>☀ Calcular</b> en la pestaña Radiación.
+      </div>
+    </div>
+  </div>`}
+
   <!-- Cargas internas -->
+  ${esT ? `
   <div id="ztLoads" class="h">
     <div class="section-hdr">👥 Ocupación</div>
     <div class="prow"><div class="plbl">Número de ocupantes</div>
@@ -13765,17 +14170,15 @@ function showZoneProps(zid){
     </div>
     <div class="chip" style="margin-top:6px"><span class="cl">Hrs activas hoy (día tipo)</span>
       <span class="cv" id="schedHrsLbl">—</span></div>
-  </div>`;
+  </div>` : ''}`;
 
-  // Inicializar sub-pestañas de zona
-  setTimeout(()=>{
-    initSchedEditor(z.id);
-  },50);
+  // Inicializar sub-pestañas de zona (el editor de horarios solo existe en T)
+  if(esT) setTimeout(()=>{ initSchedEditor(z.id); }, 50);
 }
 
 function showZoneTab(tabId, zid, btn){
   const parent=document.getElementById('rZoneContent');
-  ['ztGeneral','ztLoads','ztVent','ztSched'].forEach(id=>{
+  ['ztGeneral','ztLoads','ztVent','ztSched','ztShade'].forEach(id=>{
     const el=document.getElementById(id);
     if(el) el.classList.toggle('h',id!==tabId);
   });
@@ -15463,6 +15866,7 @@ function _snapState(){
       neighborZoneId: s.neighborZoneId || null,
       // v2.9: contacto con terreno para pisos
       groundContact: s.groundContact !== false,
+      normalFlip: s.normalFlip === true,      // v7.3
       layers: s.layers ? s.layers.map(l=>({...l})) : [],
       px:p?.x??0, py:p?.y??0, pz:p?.z??0,
       ry:r?.y??0,
@@ -15498,6 +15902,7 @@ function _restoreState(snap){
     const partition = snapItem.partition || null;
     const neighborZoneId = snapItem.neighborZoneId || null;
     const groundContact = snapItem.groundContact !== false;  // v2.9
+    const normalFlip    = snapItem.normalFlip === true;     // v7.3
     let s=surfaces.find(x=>x.id===id);
     if(!s){
       // Superficie eliminada → recrearla
@@ -15517,6 +15922,7 @@ function _restoreState(snap){
       s.partition=partition;
       s.neighborZoneId=neighborZoneId;
       s.groundContact=groundContact;
+      s.normalFlip=normalFlip;
     }
     // Restaurar posición y rotación
     s.mesh.position.set(px,py,pz);
@@ -15897,8 +16303,16 @@ function surfaceCentroidNormal(s){
     if(!isFinite(normal.x)||!isFinite(normal.y)||!isFinite(normal.z)){
       normal = new THREE.Vector3(0,1,0); // safe fallback
     }
-    // Ensure outward: if normal points toward scene origin, flip it
+    // Heurística heredada: se supone que el modelo está centrado en el
+    // origen y que las normales apuntan hacia fuera de él. Falla en cuanto
+    // el edificio no está centrado, en patios y en cualquier cara cóncava,
+    // y es la razón por la que muchos modelos importados acaban con la
+    // normal del revés.
     if(normal.dot(c) < 0) normal.negate();
+    // v7.3: corrección explícita del usuario. Se aplica DESPUÉS de la
+    // heurística, así que "invertir" siempre da la vuelta a lo que se ve
+    // en pantalla, y volver a invertir restaura el estado anterior.
+    if(s.normalFlip === true) normal.negate();
   } else {
     normal = new THREE.Vector3(0,1,0); // degenerate geometry → default up
   }
@@ -15930,6 +16344,14 @@ function _buildShadowBVH(casterSurfs){
     if(!pos) return;
     mesh.updateWorldMatrix(true,false);     // misma matriz que usaría el raycaster
     const mw=mesh.matrixWorld, idx=geo.index, sid=s.id, glz=_isGlazingSurf(s);
+    // v7.3: τ del triángulo y clave con la que se agrupa para no aplicarlo
+    // dos veces al cruzar entrada y salida del mismo volumen.
+    //   · vidrio           → τ=0.30, agrupado por superficie
+    //   · zona S con τ>0   → τ de la zona, agrupado por ZONA
+    //   · resto            → opaco
+    const zTau = (typeof zoneTau === 'function') ? zoneTau(s.zoneId) : 0;
+    const tau  = glz ? 0.30 : zTau;
+    const tkey = glz ? ('s:' + sid) : ('z:' + s.zoneId);
     const triCount = idx ? (idx.count/3) : (pos.count/3);
     for(let t=0;t<triCount;t++){
       let iA,iB,iC;
@@ -15944,7 +16366,7 @@ function _buildShadowBVH(casterSurfs){
         a:vA.clone(), b:vB.clone(), c:vC.clone(),
         min:new THREE.Vector3(minx,miny,minz), max:new THREE.Vector3(maxx,maxy,maxz),
         cx:(minx+maxx)*0.5, cy:(miny+maxy)*0.5, cz:(minz+maxz)*0.5,
-        sid, glz
+        sid, glz, tau, tkey
       });
     }
   });
@@ -16003,6 +16425,220 @@ function _bvhClosestHit(bvh, origin, dir, near, far, excludeSid){
     }
   }
   return found ? { glz:bestGlz, dist:best } : null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  FACTOR DE VISTA AL CIELO POR OBSTRUCCIÓN (v7.3)
+//
+//  Hasta v7.2 la componente difusa usaba el factor analítico (1+cosβ)/2,
+//  que solo describe la autooclusión de la propia superficie y da por
+//  supuesto que el resto del hemisferio está despejado. Un muro tapado por
+//  vegetación o por un edificio vecino recibía igualmente el 100% de la
+//  difusa.
+//
+//  Ahora el hemisferio se muestrea con la subdivisión de Tregenza (145
+//  parches de área aproximadamente igual en 8 anillos de altitud, más el
+//  cenit) y se lanza un rayo hacia el centro de cada parche:
+//
+//      SVF = Σ [ τ(dirección) · cosθ · ω ] / Σ [ cosθ · ω ]
+//
+//  θ = ángulo entre la normal de la superficie y la dirección del parche.
+//  El peso coseno hace que lo cenital pese más que lo rasante, que es lo
+//  correcto: la radiación rasante incide casi paralela a la superficie.
+//  τ viene de _bvhTransmittance, así que una zona S translúcida reduce el
+//  SVF de forma proporcional en vez de anularlo.
+//
+//  El cielo no se mueve: esto se calcula UNA vez por sensor, no por hora.
+//  Coste ≈ nSensores × 145 rayos, del orden del 3% del caché de sombras.
+//
+//  El factor de vista al SUELO se obtiene igual, muestreando el hemisferio
+//  inferior. Sin geometría bajo el horizonte el resultado coincide con el
+//  analítico (1−cosβ)/2; con un edificio delante, baja.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Anillos de Tregenza: [nº de parches, altitud del centro en grados]
+const TREGENZA_RINGS = [[30,6],[30,18],[24,30],[24,42],[18,54],[12,66],[6,78]];
+
+// Direcciones del hemisferio superior con su ángulo sólido asociado.
+let _skyPatchCache = null;
+function _skyPatches(){
+  if(_skyPatchCache) return _skyPatchCache;
+  const out = [];
+  const dAlt = 12 * Math.PI/180;                 // altura angular de cada anillo
+  TREGENZA_RINGS.forEach(([nAz, altDeg]) => {
+    const alt = altDeg * Math.PI/180;
+    // ω del parche = (banda de altitud) / (nº de parches del anillo)
+    const omega = (2*Math.PI * Math.cos(alt) * dAlt) / nAz;
+    for(let i=0;i<nAz;i++){
+      const az = (2*Math.PI*i)/nAz;
+      out.push({
+        dir: new THREE.Vector3(Math.sin(az)*Math.cos(alt), Math.sin(alt), -Math.cos(az)*Math.cos(alt)).normalize(),
+        omega
+      });
+    }
+  });
+  // Casquete cenital
+  out.push({ dir:new THREE.Vector3(0,1,0), omega: 2*Math.PI*(1-Math.cos(6*Math.PI/180)) });
+  _skyPatchCache = out;
+  return out;
+}
+
+// Espejo del anterior para el hemisferio inferior (terreno)
+let _gndPatchCache = null;
+function _gndPatches(){
+  if(_gndPatchCache) return _gndPatchCache;
+  _gndPatchCache = _skyPatches().map(p => ({
+    dir: new THREE.Vector3(p.dir.x, -p.dir.y, p.dir.z),
+    omega: p.omega
+  }));
+  return _gndPatchCache;
+}
+
+let _svfCache = null;        // Map<surfId, {sky, gnd, skyOpen, gndOpen}>
+let _svfCacheDirty = true;
+
+function invalidateSVFCache(){ _svfCacheDirty = true; }
+
+// Integra un hemisferio de parches y devuelve la FRACCIÓN DESPEJADA:
+//   0 = totalmente tapado, 1 = totalmente despejado.
+//
+// Se devuelve la fracción y no el factor de vista absoluto a propósito. El
+// factor absoluto se obtiene multiplicando por su valor analítico exacto —
+// (1+cosβ)/2 para el cielo, (1−cosβ)/2 para el suelo — de modo que una
+// superficie sin obstrucción recupera EXACTAMENTE el valor analítico y el
+// error de cuadratura de los 145 parches (≈0,2%) no se cuela en el
+// resultado. Solo la parte obstruida depende del muestreo, que es donde
+// realmente hace falta medir.
+function _integrateHemisphere(patches, origins, normal, surfId, bvh){
+  let num = 0, den = 0;
+  for(const p of patches){
+    const cosT = normal.dot(p.dir);
+    if(cosT <= 0) continue;                       // parche detrás de la superficie
+    const w = cosT * p.omega;
+    den += w;
+    let tauSum = 0;
+    for(const o of origins) tauSum += _bvhTransmittance(bvh, o, p.dir, 0.05, 500, surfId);
+    num += w * (tauSum / origins.length);
+  }
+  return den > 0 ? {frac: num/den, den} : {frac: 0, den: 0};
+}
+
+// Calcula SVF y factor de vista al suelo para las superficies indicadas.
+async function buildSkyViewFactors(surfList, onProgress){
+  _svfCache = new Map();
+  _svfCacheDirty = false;
+
+  const shaderZoneIds = new Set(zones.filter(z=>z.shader||z.thermal).map(z=>z.id));
+  const casterSurfs = surfaces.filter(s => s.mesh && s.mesh.isMesh &&
+    (!s.zoneId || shaderZoneIds.has(s.zoneId)));
+  const bvh = _buildShadowBVH(casterSurfs);
+
+  const sky = _skyPatches(), gnd = _gndPatches();
+  let rays = 0, done = 0;
+
+  for(const s of surfList){
+    const cn = surfaceCentroidNormal(s);
+    if(!cn){ done++; continue; }
+    const normal = cn.normal.clone().normalize();
+    const cosB   = Math.max(-1, Math.min(1, normal.y));
+
+    // Mismos sensores que el caché de sombras, desplazados sobre la normal
+    const nPts   = (s.area >= 60) ? 5 : (s.area >= 10 ? 3 : 1);
+    const origins = _shadowSamplePoints(s, cn, nPts).map(pt => pt.addScaledVector(normal, 0.08));
+
+    const rSky = _integrateHemisphere(sky, origins, normal, s.id, bvh);
+    const rGnd = _integrateHemisphere(gnd, origins, normal, s.id, bvh);
+    rays += (sky.length + gnd.length) * origins.length;
+
+    const skyOpen = (1 + cosB)/2;   // factor analítico sin obstrucción
+    const gndOpen = (1 - cosB)/2;
+    _svfCache.set(s.id, {
+      sky: skyOpen * rSky.frac,    // factor de vista ABSOLUTO, ya obstruido
+      gnd: gndOpen * rGnd.frac,
+      skyFrac: rSky.frac,          // fracción despejada, para el informe
+      gndFrac: rGnd.frac,
+      skyOpen, gndOpen
+    });
+
+    done++;
+    if(done % 25 === 0){
+      onProgress && onProgress(Math.round(done/surfList.length*100));
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  onProgress && onProgress(100);
+
+  // Cuánto ha cambiado respecto al modelo sin obstrucción
+  let obstruidas = 0, sumaRel = 0, cuenta = 0;
+  for(const v of _svfCache.values()){
+    if(v.skyOpen > 0.01){
+      sumaRel += v.skyFrac; cuenta++;
+      if(v.skyFrac < 0.98) obstruidas++;
+    }
+  }
+  log(`Factor de vista al cielo: ${surfList.length} superficies · ${(rays/1000).toFixed(0)}k rayos · ` +
+      `${obstruidas} con el cielo parcialmente tapado · ` +
+      `SVF medio ${(cuenta ? sumaRel/cuenta*100 : 100).toFixed(0)}% del hemisferio despejado.`, 'ok');
+
+  // v7.3 — Diagnóstico. Una superficie EXTERIOR que no ve nada de cielo casi
+  // siempre delata un problema del modelo, no una obstrucción real: normal
+  // invertida (mira hacia dentro del volumen) o una cara interior marcada
+  // como exterior por error. Sin este aviso el usuario vería la difusa caer
+  // a cero sin saber por qué.
+  const ciegas = [];
+  _svfCache.forEach((v, id) => { if(v.skyFrac <= 0.001) ciegas.push(id); });
+  if(ciegas.length){
+    const pct = (ciegas.length / Math.max(1,_svfCache.size) * 100).toFixed(0);
+    const nombres = ciegas.slice(0,5)
+      .map(id => (surfaces.find(s=>s.id===id)||{}).name || id).join(', ');
+    log(`⚠ ${ciegas.length} superficie(s) exteriores (${pct}%) no ven NADA de cielo: ${nombres}` +
+        (ciegas.length>5 ? ` y ${ciegas.length-5} más` : '') + '. ' +
+        `Revisa si su normal apunta hacia dentro o si en realidad son caras interiores ` +
+        `marcadas como exteriores — reciben 0 de difusa y 0 de reflejada.`, 'warn');
+  }
+  return _svfCache;
+}
+
+// ── v7.3: transmitancia acumulada a lo largo de un rayo ────────────────
+// Devuelve la fracción de radiación que llega del origen hasta `far`:
+//   1   → trayecto despejado
+//   0   → hay al menos un obstáculo opaco
+//   0<τ<1 → solo obstáculos translúcidos; τ = Π de las τ de cada volumen
+//
+// A diferencia de _bvhClosestHit, recorre TODOS los impactos, porque un
+// rayo puede atravesar varias zonas translúcidas. Corta en cuanto encuentra
+// un opaco, que es el caso mayoritario y el más barato.
+//
+// El agrupado por `tkey` implementa la convención documentada arriba: cada
+// volumen de sombra aporta su τ una sola vez aunque el rayo cruce dos de
+// sus caras.
+const _bvhTauSeen = new Set();
+function _bvhTransmittance(bvh, origin, dir, near, far, excludeSid){
+  if(!bvh || !bvh.root) return 1;
+  _bvhRay.origin.copy(origin); _bvhRay.direction.copy(dir);
+  _bvhTauSeen.clear();
+  let tau = 1;
+  const stack=[bvh.root];
+  while(stack.length){
+    const node=stack.pop();
+    if(!_rayHitsBox(_bvhRay, node.min, node.max, near, far)) continue;
+    if(node.tris){
+      for(const t of node.tris){
+        if(t.sid===excludeSid) continue;
+        if(!_bvhRay.intersectTriangle(t.a,t.b,t.c,false,_bvhPt)) continue;
+        const d=_bvhPt.distanceTo(origin);
+        if(d<near || d>=far) continue;
+        if(!(t.tau > 0)) return 0;               // opaco ⇒ sombra total
+        if(_bvhTauSeen.has(t.tkey)) continue;    // mismo volumen ya contado
+        _bvhTauSeen.add(t.tkey);
+        tau *= t.tau;
+        if(tau < 1e-4) return 0;                 // prácticamente opaco
+      }
+    } else {
+      stack.push(node.left); stack.push(node.right);
+    }
+  }
+  return tau;
 }
 
 // ── v7.0: Muestreo estratificado de puntos sobre una superficie ─────────
@@ -16178,10 +16814,11 @@ async function buildShadowCache(onProgress){
           if(origins && origins.length){
             let lit = 0;
             for(let pi=0; pi<origins.length; pi++){
-              // Impacto más cercano excluyendo la propia malla; near/far idénticos.
-              const hit = _bvhClosestHit(_shadowBVH, origins[pi], sunDir, 0.05, 500, s.id);
+              // v7.3: transmitancia acumulada en vez del impacto más cercano.
+              // Un rayo que cruza vegetación con τ=0.25 y luego nada más
+              // devuelve 0.25 en vez de 0; si además cruza un muro, 0.
+              lit += _bvhTransmittance(_shadowBVH, origins[pi], sunDir, 0.05, 500, s.id);
               raysCast++;
-              lit += hit ? (hit.glz ? 0.3 : 0) : 1;  // glazing transmits ~30% of solar
             }
             factor = lit / origins.length;
           }
@@ -20904,6 +21541,7 @@ function guardarProyectoAs(evt){
         thermal:z.thermal||false, shader:z.shader!==false, _open:z._open,
         locked: !!z.locked,   // v2.6: estado de bloqueo
         _visible: z._visible !== false,
+        transmissivity: (z.transmissivity == null ? null : +z.transmissivity),  // v7.3: τ zonas S
         _loads: z._loads ? {
           occDensity:z._loads.occDensity, occMet:z._loads.occMet,
           occCount:z._loads.occCount,  // v3.2: número total de ocupantes
@@ -20941,6 +21579,7 @@ function guardarProyectoAs(evt){
           neighborZoneId: s.neighborZoneId || null,
           // v2.9: contacto con terreno para pisos (default true)
           groundContact: s.groundContact !== false,
+          normalFlip: s.normalFlip === true,   // v7.3: normal invertida por el usuario
           position:[s.mesh.position.x,s.mesh.position.y,s.mesh.position.z],
           rotation:[s.mesh.rotation.x,s.mesh.rotation.y,s.mesh.rotation.z],
           color: s.mesh?s.mesh.material.color.getHex():0x8899aa,
@@ -21169,7 +21808,10 @@ function _cargarProyectoData(proj){
       thermal: zd.thermal === true,
       shader:  zd.shader  !== false,  // default true if not explicitly false
       locked:  zd.locked === true,    // v2.6: estado de bloqueo (default false)
-      _visible: zd._visible !== false // default visible
+      _visible: zd._visible !== false, // default visible
+      // v7.3: τ de zona de sombra. Proyectos anteriores no lo traen ⇒ opaca.
+      transmissivity: (zd.transmissivity == null ? ZONE_TAU_DEFAULT
+                                                 : Math.max(0, Math.min(1, +zd.transmissivity || 0)))
     };
     if(zd._loads){
       // Merge saved loads over defaults so missing fields get sensible values
@@ -21263,7 +21905,8 @@ function _cargarProyectoData(proj){
         partition: sd.partition || null,
         neighborZoneId: sd.neighborZoneId || null,
         // v2.9: contacto con terreno (proyectos antiguos sin campo → true)
-        groundContact: sd.groundContact !== false};
+        groundContact: sd.groundContact !== false,
+        normalFlip: sd.normalFlip === true};   // v7.3
       surfaces.push(surf);
       aplicarColorMaterial(surf);
     }catch(e){ log('Error cargando superficie '+(sd.name||'?')+': '+e.message,'warn'); }
@@ -21814,9 +22457,10 @@ function exportTabPDF(tabId, title){
         renderer.render(scene, camera);
         const dataUrl = renderer.domElement.toDataURL('image/png');
         // Capture current period label and meta for caption
-        const periodEl  = document.getElementById('radPeriod');
+        // v7.2.4: el selector 'radPeriod' se sustituyó por el modo + controles
+        // contextuales. La etiqueta legible del periodo la da _radPeriod().
         const metaEl    = document.getElementById('rStatMeta');
-        const periodLbl = periodEl ? periodEl.options[periodEl.selectedIndex]?.text || '' : '';
+        const periodLbl = (typeof _radPeriod === 'function') ? _radPeriod().label : '';
         const metaTxt   = metaEl ? metaEl.textContent : '';
         viewportImgTag = `
           <div style="margin-bottom:14px;page-break-inside:avoid">
@@ -22494,6 +23138,14 @@ async function calcularRadiacion(){
     setStatus('Calculando sombras…');
     await buildShadowCache(p => setStatus(`Sombras ${p}%…`));
     if(typeof _updateShadowStat === 'function') _updateShadowStat();
+    invalidateSVFCache();
+  }
+
+  // ── v7.3: factor de vista al cielo por obstrucción ───────────────────
+  const usarSVF = document.getElementById('radUseSVF')?.checked !== false;
+  if(usarSVF && (_svfCacheDirty || !_svfCache)){
+    setStatus('Vista al cielo…');
+    await buildSkyViewFactors(extSurfs.filter(s => s.exterior), p => setStatus(`Vista al cielo ${p}%…`));
   }
   setStatus('Calculando radiación…');
 
@@ -22527,12 +23179,19 @@ async function calcularRadiacion(){
       const glassLayer = (s.layers||[]).find(l=>{ const m=getMat(l.matId); return m&&m.cat==='Vidrio'; });
       if(glassLayer){ const gm=getMat(glassLayer.matId); if(gm&&gm.shgc) shgc=gm.shgc; }
     }
+    // v7.3: si hay factores de vista medidos, sustituyen a los analíticos.
+    // Los pisos y losas siguen a cero: no reciben radiación exterior.
+    const svf = (usarSVF && _svfCache) ? _svfCache.get(s.id) : null;
+    const skyVF = isFloor ? 0 : (svf ? svf.sky : (1 + cosB) / 2);
+    const gndVF = isFloor ? 0 : (svf ? svf.gnd : (1 - cosB) / 2);
     surfGeom.set(s.id, {
       normal,
       isSkylight,
       shgc,
-      skyVF: isFloor ? 0 : (1 + cosB) / 2,
-      gndVF: isFloor ? 0 : (1 - cosB) / 2,
+      skyVF,
+      gndVF,
+      skyVFopen: isFloor ? 0 : (1 + cosB) / 2,   // referencia sin obstrucción
+      svfMedido: !!svf,
     });
   });
 
@@ -22543,12 +23202,20 @@ async function calcularRadiacion(){
 
   // ── Initialize result accumulators ──────────────────────────────────
   _radResults = new Map();
+  // v7.2.4: además del anual y el mensual se acumula el DIARIO (365 valores
+  // por serie). Con esto el panel puede reportar un día concreto o un rango
+  // arbitrario de fechas sin recalcular nada — basta sumar el tramo.
+  // Coste: 365×4 float32 = 5,8 kB por superficie.
   extSurfs.forEach(s => _radResults.set(s.id, {
     annual:0, dir_ann:0, dif_ann:0, ref_ann:0,
     monthly:  new Float32Array(12),
     dir_mo:   new Float32Array(12),
     dif_mo:   new Float32Array(12),
     ref_mo:   new Float32Array(12),
+    daily:    new Float32Array(365),
+    dir_da:   new Float32Array(365),
+    dif_da:   new Float32Array(365),
+    ref_da:   new Float32Array(365),
   }));
 
   // ── 8760-hour integration loop ───────────────────────────────────────
@@ -22562,7 +23229,8 @@ async function calcularRadiacion(){
         if(DNI + DHI < 1) continue;          // night / no radiation
 
         // Solar position
-        const doy   = Math.floor(hr / 24) + 1;
+        const dayIdx = Math.floor(hr / 24);          // 0..364
+        const doy    = dayIdx + 1;
         const sd    = spSunData(_latitude, doy, hh + 0.5);
         if(sd.alt <= 0.5) continue;           // sun below horizon
 
@@ -22612,6 +23280,10 @@ async function calcularRadiacion(){
           r.dir_mo[mo]  += I_dir;
           r.dif_mo[mo]  += I_dif;
           r.ref_mo[mo]  += I_ref;
+          r.daily[dayIdx]  += tot;
+          r.dir_da[dayIdx] += I_dir;
+          r.dif_da[dayIdx] += I_dif;
+          r.ref_da[dayIdx] += I_ref;
           // Track transmitted solar through skylight (SHGC × incident)
           if(sg.isSkylight && tot > 0){
             r.transmitted_ann = (r.transmitted_ann||0) + tot * sg.shgc;
@@ -22636,6 +23308,10 @@ async function calcularRadiacion(){
     for(let m = 0; m < 12; m++){
       r.monthly[m] /= 1000; r.dir_mo[m]  /= 1000;
       r.dif_mo[m]  /= 1000; r.ref_mo[m]  /= 1000;
+    }
+    for(let d = 0; d < 365; d++){
+      r.daily[d]  /= 1000; r.dir_da[d] /= 1000;
+      r.dif_da[d] /= 1000; r.ref_da[d] /= 1000;
     }
   }
 
@@ -22680,6 +23356,7 @@ async function calcularRadiacion(){
         // Annual transmitted energy through all glazing [kWh/yr total]
         let transTot_ann = 0;
         const transMo = new Float32Array(12);
+        const transDa = new Float32Array(365);
         glazSurfsRad.forEach(vs => {
           const rV = _radResults.get(vs.id);
           if(!rV) return;
@@ -22690,6 +23367,9 @@ async function calcularRadiacion(){
           transTot_ann += rV.annual * shgcV * dirtV * vs.area;
           for(let m = 0; m < 12; m++){
             transMo[m] += rV.monthly[m] * shgcV * dirtV * vs.area;
+          }
+          for(let d = 0; d < 365; d++){
+            transDa[d] += rV.daily[d] * shgcV * dirtV * vs.area;
           }
         });
         // Calcular fracciones de reparto entre piso e interiores
@@ -22705,6 +23385,7 @@ async function calcularRadiacion(){
         if(wPiso > 0){
           const floorAnn = transTot_ann * wPiso / pisoAreaRad;
           const floorMo  = transMo.map(v => v * wPiso / pisoAreaRad);
+          const floorDa  = transDa.map(v => v * wPiso / pisoAreaRad);
           pisoSurfsRad.forEach(s => {
             const r = _radResults.get(s.id);
             if(!r) return;
@@ -22719,11 +23400,18 @@ async function calcularRadiacion(){
               r.dir_mo[m]  = 0;
               r.ref_mo[m]  = 0;
             }
+            for(let d = 0; d < 365; d++){
+              r.daily[d]  = floorDa[d];
+              r.dif_da[d] = floorDa[d];
+              r.dir_da[d] = 0;
+              r.ref_da[d] = 0;
+            }
           });
         }
         if(wInt > 0){
           const intAnn = transTot_ann * wInt / intArea;
           const intMo  = transMo.map(v => v * wInt / intArea);
+          const intDa  = transDa.map(v => v * wInt / intArea);
           intReceivers.forEach(s => {
             const r = _radResults.get(s.id);
             if(!r) return;
@@ -22737,6 +23425,12 @@ async function calcularRadiacion(){
               r.dif_mo[m]  = intMo[m];
               r.dir_mo[m]  = 0;
               r.ref_mo[m]  = 0;
+            }
+            for(let d = 0; d < 365; d++){
+              r.daily[d]  = intDa[d];
+              r.dif_da[d] = intDa[d];
+              r.dir_da[d] = 0;
+              r.ref_da[d] = 0;
             }
           });
         }
@@ -22753,7 +23447,15 @@ async function calcularRadiacion(){
   const meanAnn = [..._radResults.values()].reduce((a,r) => a+r.annual, 0)
                   / Math.max(_radResults.size, 1);
   setStatus(`✓ ${extSurfs.length} sup · ${meanAnn.toFixed(0)} kWh/m²`);
-  log(`Radiación calculada: ${extSurfs.length} sup · media anual ${meanAnn.toFixed(0)} kWh/m² · ρ=${rho}`, 'ok');
+  log(`Radiación calculada: ${extSurfs.length} sup · media anual ${meanAnn.toFixed(0)} kWh/m² · ρ=${rho}` +
+      (usarSVF ? ' · difusa corregida por obstrucción' : ' · difusa con hemisferio despejado'), 'ok');
+
+  // v7.3: avisar de las zonas de sombra translúcidas que participaron
+  const zonasTau = zones.filter(z => !z.thermal && zoneTau(z.id) > 0);
+  if(zonasTau.length){
+    log('Zonas de sombra translúcidas aplicadas: ' +
+        zonasTau.map(z => `"${z.name}" τ=${(zoneTau(z.id)*100).toFixed(0)}%`).join(' · ') + '.', 'ok');
+  }
 
   // ── Habilitar botón PDF ───────────────────────────────────────────────
   const pdfBtn = document.getElementById('bRadPdfBtn');
@@ -22768,11 +23470,110 @@ async function calcularRadiacion(){
   actualizarRadiacion();
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  SELECCIÓN DE PERIODO (v7.2.4)
+//  El motor acumula por día (365 valores). Cualquier periodo — anual, un
+//  mes, un día suelto o un rango de fechas — se resuelve sumando el tramo
+//  correspondiente del vector diario. No requiere recalcular.
+//  Año de referencia no bisiesto, coherente con las 8760 h del EPW.
+// ═══════════════════════════════════════════════════════════════════════
+const _RAD_MO_LEN   = [31,28,31,30,31,30,31,31,30,31,30,31];
+const _RAD_MO_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                       'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const _RAD_MO_ABBR  = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+// Primer índice de día (0-based) de cada mes
+const _RAD_MO_START = (() => {
+  const a = [0];
+  for(let m=0;m<11;m++) a.push(a[m] + _RAD_MO_LEN[m]);
+  return a;
+})();
+
+// 'MM-DD' → índice de día 0..364 (null si la fecha no es válida)
+function _radDateToIdx(str){
+  const m = /^(\d{1,2})-(\d{1,2})$/.exec((str||'').trim());
+  if(!m) return null;
+  const mo = parseInt(m[1],10) - 1, d = parseInt(m[2],10);
+  if(mo < 0 || mo > 11 || d < 1 || d > _RAD_MO_LEN[mo]) return null;
+  return _RAD_MO_START[mo] + (d - 1);
+}
+// índice de día 0..364 → 'D Mes'
+function _radIdxToLabel(i){
+  i = Math.max(0, Math.min(364, i|0));
+  let mo = 11;
+  for(let m=0;m<12;m++) if(i >= _RAD_MO_START[m]) mo = m;
+  return `${i - _RAD_MO_START[mo] + 1} ${_RAD_MO_ABBR[mo]}`;
+}
+
+// Lee la interfaz y devuelve el periodo activo como rango de días [d0,d1]
+// inclusive, más una etiqueta legible y el nº de días.
+function _radPeriod(){
+  const mode = document.getElementById('radMode')?.value || 'anual';
+  if(mode === 'mes'){
+    const mo = parseInt(document.getElementById('radMonth')?.value ?? 0) || 0;
+    const d0 = _RAD_MO_START[mo], d1 = d0 + _RAD_MO_LEN[mo] - 1;
+    return {mode, d0, d1, dias:_RAD_MO_LEN[mo], label:_RAD_MO_NAMES[mo]};
+  }
+  if(mode === 'dia'){
+    const d = _radDateToIdx(document.getElementById('radDay')?.value) ?? 0;
+    return {mode, d0:d, d1:d, dias:1, label:_radIdxToLabel(d)};
+  }
+  if(mode === 'rango'){
+    let a = _radDateToIdx(document.getElementById('radFrom')?.value);
+    let b = _radDateToIdx(document.getElementById('radTo')?.value);
+    if(a === null && b === null) return {mode:'anual', d0:0, d1:364, dias:365, label:'Anual'};
+    if(a === null) a = 0;
+    if(b === null) b = 364;
+    if(a > b){ const t=a; a=b; b=t; }   // fechas invertidas: se ordenan solas
+    return {mode, d0:a, d1:b, dias:b-a+1,
+            label:`${_radIdxToLabel(a)} → ${_radIdxToLabel(b)} (${b-a+1} días)`};
+  }
+  return {mode:'anual', d0:0, d1:364, dias:365, label:'Anual'};
+}
+
+// Valor de una serie para el periodo activo, en kWh/m².
+// 'tot' | 'dir' | 'dif' | 'ref'
+function _radVal(r, serie, P){
+  if(!r) return 0;
+  if(!P) P = _radPeriod();
+  const ANN = {tot:'annual', dir:'dir_ann', dif:'dif_ann', ref:'ref_ann'};
+  const DA  = {tot:'daily',  dir:'dir_da',  dif:'dif_da',  ref:'ref_da'};
+  if(P.mode === 'anual') return r[ANN[serie]] || 0;
+  const arr = r[DA[serie]];
+  // Resultados de una versión anterior sin vector diario: se cae al mensual
+  // (aproximado) en vez de reportar cero.
+  if(!arr){
+    const MO = {tot:'monthly', dir:'dir_mo', dif:'dif_mo', ref:'ref_mo'};
+    const mArr = r[MO[serie]];
+    if(!mArr) return 0;
+    let v = 0;
+    for(let m=0;m<12;m++){
+      const s0=_RAD_MO_START[m], s1=s0+_RAD_MO_LEN[m]-1;
+      const lo=Math.max(s0,P.d0), hi=Math.min(s1,P.d1);
+      if(hi>=lo) v += mArr[m] * (hi-lo+1) / _RAD_MO_LEN[m];
+    }
+    return v;
+  }
+  let v = 0;
+  for(let d = P.d0; d <= P.d1; d++) v += arr[d];
+  return v;
+}
+
+// Muestra/oculta los controles según el modo elegido
+function radModeChanged(){
+  const mode = document.getElementById('radMode')?.value || 'anual';
+  const show = (id, on) => { const e = document.getElementById(id); if(e) e.style.display = on ? '' : 'none'; };
+  show('radMonthWrap', mode === 'mes');
+  show('radDayWrap',   mode === 'dia');
+  show('radRangeWrap', mode === 'rango');
+  actualizarRadiacion();
+}
+
 // ── Apply colors + update legend + stats + table ─────────────────────────
 function actualizarRadiacion(){
   if(!_radResults || !_radResults.size) return;
 
-  const period  = document.getElementById('radPeriod')?.value ?? 'anual';
+  const P       = _radPeriod();
   const doColor = document.getElementById('radShowColor')?.checked !== false;
   const rho     = parseFloat(document.getElementById('radAlbedo')?.value ?? 0.2);
 
@@ -22783,12 +23584,7 @@ function actualizarRadiacion(){
   if(!extSurfs.length) return;
 
   // Values for chosen period
-  const isAnn = period === 'anual';
-  const mo    = isAnn ? 0 : parseInt(period);
-  const vals  = extSurfs.map(s => {
-    const r = _radResults.get(s.id);
-    return isAnn ? (r?.annual||0) : (r?.monthly[mo]||0);
-  });
+  const vals  = extSurfs.map(s => _radVal(_radResults.get(s.id), 'tot', P));
   const maxV = Math.max(...vals, 0.01);
   const avgV = vals.reduce((a,b) => a+b, 0) / Math.max(vals.length, 1);
 
@@ -22838,28 +23634,21 @@ function actualizarRadiacion(){
   const sr = document.getElementById('radStatsRow');
   if(sr) sr.style.display = 'block';
 
-  const avgDir = extSurfs.reduce((a,s) => {
-    const r = _radResults.get(s.id);
-    return a + (isAnn ? r.dir_ann : r.dir_mo[mo]);
-  }, 0) / Math.max(extSurfs.length,1);
-  const avgDif = extSurfs.reduce((a,s) => {
-    const r = _radResults.get(s.id);
-    return a + (isAnn ? r.dif_ann : r.dif_mo[mo]);
-  }, 0) / Math.max(extSurfs.length,1);
-  const avgRef = extSurfs.reduce((a,s) => {
-    const r = _radResults.get(s.id);
-    return a + (isAnn ? r.ref_ann : r.ref_mo[mo]);
-  }, 0) / Math.max(extSurfs.length,1);
+  const avgDir = extSurfs.reduce((a,s) => a + _radVal(_radResults.get(s.id),'dir',P), 0) / Math.max(extSurfs.length,1);
+  const avgDif = extSurfs.reduce((a,s) => a + _radVal(_radResults.get(s.id),'dif',P), 0) / Math.max(extSurfs.length,1);
+  const avgRef = extSurfs.reduce((a,s) => a + _radVal(_radResults.get(s.id),'ref',P), 0) / Math.max(extSurfs.length,1);
 
-  const MOS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-  const pLbl = isAnn ? 'Anual' : MOS[mo];
+  const pLbl = P.label;
+  // Media diaria: en periodos cortos la cifra acumulada dice poco por sí sola.
+  const avgPorDia = P.dias > 1 ? avgV / P.dias : avgV;
   const el = id => document.getElementById(id);
   if(el('rStatDir')) el('rStatDir').textContent = avgDir.toFixed(0);
   if(el('rStatDif')) el('rStatDif').textContent = avgDif.toFixed(0);
   if(el('rStatRef')) el('rStatRef').textContent = avgRef.toFixed(0);
   if(el('rStatTot')) el('rStatTot').textContent = avgV.toFixed(0);
   if(el('rStatMeta')) el('rStatMeta').textContent =
-    `${pLbl} · Máx ${maxV.toFixed(0)} kWh/m² · ρ=${rho} · ${extSurfs.length} sup.`;
+    `${pLbl} · Máx ${maxV.toFixed(P.dias>31?0:2)} kWh/m² · ρ=${rho} · ${extSurfs.length} sup.` +
+    (P.dias > 1 ? ` · media diaria ${avgPorDia.toFixed(2)} kWh/m²·día` : '');
 
   // ── Surface table ────────────────────────────────────────────────────
   const sorted = extSurfs.map((s,i) => ({s, v:vals[i]})).sort((a,b) => b.v - a.v);
@@ -22869,9 +23658,10 @@ function actualizarRadiacion(){
     const lum     = (r*0.299 + g*0.587 + b*0.114) / 255;
     const fg      = lum > 0.5 ? '#111' : '#eee';
     const rdata   = _radResults.get(s.id);
-    const vDir    = isAnn ? rdata.dir_ann : rdata.dir_mo[mo];
-    const vDif    = isAnn ? rdata.dif_ann : rdata.dif_mo[mo];
-    const vRef    = isAnn ? rdata.ref_ann : rdata.ref_mo[mo];
+    const vDir    = _radVal(rdata,'dir',P);
+    const vDif    = _radVal(rdata,'dif',P);
+    const vRef    = _radVal(rdata,'ref',P);
+    const dec     = P.dias > 31 ? 0 : 2;   // periodos cortos → más decimales
     const zone    = zones.find(z => z.id === s.zoneId);
     const stag3   = s.tag || autoTag(s);
     const tagIco  = TAG_SVG[stag3] || TAG_ICON[stag3] || '▪';
@@ -22905,10 +23695,10 @@ function actualizarRadiacion(){
       <td style="padding:2px 2px;text-align:center;font-size:.52rem;color:${partColor};font-weight:600" title="${partTip}">${partLbl}</td>
       <td style="padding:2px 3px;color:var(--text3);font-size:.52rem">${zone?.name||'—'}</td>
       <td style="padding:2px 3px;text-align:right;font-size:.56rem">${s.area.toFixed(1)}</td>
-      <td style="padding:2px 3px;text-align:right;color:#ffaa44;font-size:.56rem">${vDir.toFixed(0)}</td>
-      <td style="padding:2px 3px;text-align:right;color:#55aaff;font-size:.56rem">${vDif.toFixed(0)}</td>
-      <td style="padding:2px 3px;text-align:right;color:#88cc55;font-size:.56rem">${vRef.toFixed(0)}</td>
-      <td style="padding:2px 5px;text-align:right;background:rgb(${r},${g},${b});color:${fg};font-weight:700;font-size:.6rem;border-radius:3px">${v.toFixed(0)}</td>
+      <td style="padding:2px 3px;text-align:right;color:#ffaa44;font-size:.56rem">${vDir.toFixed(dec)}</td>
+      <td style="padding:2px 3px;text-align:right;color:#55aaff;font-size:.56rem">${vDif.toFixed(dec)}</td>
+      <td style="padding:2px 3px;text-align:right;color:#88cc55;font-size:.56rem">${vRef.toFixed(dec)}</td>
+      <td style="padding:2px 5px;text-align:right;background:rgb(${r},${g},${b});color:${fg};font-weight:700;font-size:.6rem;border-radius:3px">${v.toFixed(dec)}</td>
     </tr>`;
   }).join('');
 
@@ -22944,8 +23734,9 @@ function actualizarRadiacion(){
   const rt = document.getElementById('radTable');
   if(rt) rt.innerHTML = `
     <div style="padding:3px 5px 3px;border-bottom:1px solid var(--border);font-size:.53rem;color:var(--text3)">
-      <b style="color:var(--text2)">${pLbl}</b> · Máx <b style="color:#f84">${maxV.toFixed(0)}</b> kWh/m²
-      · Media <b style="color:var(--accent)">${avgV.toFixed(0)}</b> kWh/m²
+      <b style="color:var(--text2)">${pLbl}</b> · Máx <b style="color:#f84">${maxV.toFixed(P.dias>31?0:2)}</b> kWh/m²
+      · Media <b style="color:var(--accent)">${avgV.toFixed(P.dias>31?0:2)}</b> kWh/m²
+      ${P.dias>1?` · <b style="color:var(--text2)">${(avgV/P.dias).toFixed(2)}</b> kWh/m²·día`:''}
       ${sorted.length>80?` · ${sorted.length} sup (80 mostradas)`:''}
     </div>
     <table style="width:100%;border-collapse:collapse">
@@ -23379,7 +24170,7 @@ function mostrarAcercaDeNuevo(){
   if(old) old.remove();
   const HTML = `
 <div id="modalAcercaNew" style="position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;display:flex;align-items:center;justify-content:center;padding:14px" onclick="if(event.target===this)this.remove()">
-  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(620px,95vw);max-height:88vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
         <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v7.2</span></div>
@@ -23388,33 +24179,99 @@ function mostrarAcercaDeNuevo(){
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
     </div>
 
-    <div style="font-size:.78rem;color:var(--text2);line-height:1.8">
-      <p style="margin-bottom:14px">
+    <div style="font-size:.76rem;color:var(--text2);line-height:1.75">
+
+      <p style="margin-bottom:12px">
         <strong style="color:var(--text)">BioSim</strong> es una herramienta educacional desarrollada para
         los cursos de <em style="color:var(--accent2);font-style:normal;font-weight:600">Bioclimática</em> y
         <em style="color:var(--accent2);font-style:normal;font-weight:600">Seminario 2</em> de la
         <strong style="color:var(--text)">Universidad de San Buenaventura</strong>.
       </p>
-      <p style="margin-bottom:14px">
-        Trabaja el <strong style="color:var(--text)">método de las admitancias térmicas</strong>
-        (CIBSE Guide A 2015), con todas las limitaciones técnicas que esto implica. Está pensada
-        como apoyo didáctico al diseño bioclimático en etapas tempranas, no como sustituto de
-        simuladores profesionales validados (EnergyPlus, IES-VE, TAS, DesignBuilder).
+
+      <div style="background:var(--bg3);border-left:3px solid var(--accent2);border-radius:5px;padding:11px 15px;margin-bottom:6px">
+        Sigue la filosofía de <strong style="color:var(--text)">Autodesk Ecotect</strong>: una herramienta de
+        <strong style="color:var(--text)">diseño preliminar</strong> que privilegia la respuesta rápida, la lectura
+        visual y la comprensión de los mecanismos físicos por encima de la precisión numérica absoluta.
+        Está pensada para explorar y comparar alternativas en etapas tempranas de proyecto, no para
+        verificar el desempeño final de un edificio.
+      </div>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Alcances</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px">Modelado por importación <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">OBJ · STL · GLTF/GLB</span>, con zonificación,
+          etiquetado automático de superficies y editor de capas constructivas.</li>
+        <li style="margin-bottom:7px">Transmitancia <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">U</span> por composición multicapa
+          (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ISO 6946</span>) y contacto con terreno (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ISO 13370</span>),
+          sobre una biblioteca de materiales editable.</li>
+        <li style="margin-bottom:7px">Geometría solar: declinación, ecuación del tiempo y corrección de longitud;
+          diagrama solar, máscaras de sombra y planos de corte.</li>
+        <li style="margin-bottom:7px">Radiación solar incidente horaria sobre las <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">8760 h</span> del EPW,
+          con sombreamiento por trazado de rayos acelerado con <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">BVH</span> y muestreo
+          multipunto por superficie. Resultados en <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">anual · mensual · un día · rango de fechas</span>.</li>
+        <li style="margin-bottom:7px">Balance térmico por el <strong style="color:var(--text)">método de las admitancias</strong>
+          (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">CIBSE Guide A 2015</span>) y confort adaptativo
+          (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ASHRAE 55</span>), con análisis estacional e informes exportables a PDF.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Limitaciones conocidas</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Cielo difuso isótropo</strong> (Liu–Jordan). No incorpora
+          las componentes circunsolar ni de brillo de horizonte del modelo de Perez, de modo que con cielo
+          despejado subestima la fachada orientada al sol, típicamente entre un 5 % y un 20 %.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El sombreamiento solo afecta a la radiación directa.</strong>
+          Las componentes difusa y reflejada usan factores de vista analíticos que suponen el hemisferio
+          despejado, así que una superficie muy obstruida recibe más difusa de la real.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Sin interreflexión entre superficies.</strong> Igual que
+          Ecotect, los obstáculos bloquean pero no devuelven radiación. La reflejada procede únicamente
+          del plano de terreno mediante una albedo global.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Método pseudo-dinámico.</strong> Las admitancias resuelven
+          la respuesta cíclica en torno a un valor medio; no es un balance dinámico hora a hora con
+          funciones de transferencia como el de EnergyPlus o TAS.</li>
+        <li style="margin-bottom:7px">La radiación transmitida al interior por los acristalamientos se reparte con pesos
+          fijos (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">60 % pisos · 40 % particiones</span>), sin trazado de rayos interior.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Normales importadas.</strong> La orientación
+          de cada superficie se deduce del orden de sus vértices más una heurística que supone el modelo centrado
+          en el origen. En modelos importados esto falla con frecuencia y deja caras mirando hacia dentro, que
+          quedan sin sol y sin cielo. Usa <em>Modelo → Ver normales</em> y
+          <em>Selección → Normales sospechosas</em> para revisarlo antes de dar por buenos los resultados.</li>
+        <li style="margin-bottom:7px">El huso horario se deduce de la longitud (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">round(lon/15)</span>).
+          Es correcto en Colombia y en la mayoría de husos solares, pero no en husos de media hora ni en
+          países con hora legal desplazada.</li>
+        <li style="margin-bottom:7px">Año de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">365 días</span>, sin bisiestos, coherente con el archivo EPW.
+          Un solo plano de corte activo a la vez.</li>
+        <li style="margin-bottom:7px">El muestreo de sombras usa del orden de 4 sensores por superficie; las superficies
+          menores de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">3 m²</span> se resuelven con un único rayo, de modo que su
+          sombreamiento es binario.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">No ha sido validada</strong> según
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ASHRAE 140</span> ni ningún otro protocolo de contraste. No debe usarse para
+          certificación energética, verificación normativa ni justificación de cumplimiento.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Uso previsto</div>
+      <p style="margin:8px 0 4px">
+        Comparar alternativas de orientación, envolvente, protección solar y ventilación en fase de
+        anteproyecto; enseñar los mecanismos del comportamiento térmico y solar; y producir material
+        gráfico para sustentar decisiones de diseño.
       </p>
-      <p style="margin-bottom:18px">
-        Fue desarrollada mediante la aplicación de <strong style="color:var(--text)">Inteligencia Artificial</strong>
-        a través del modelo <em style="font-family:var(--font-mono);color:var(--accent)">Claude Opus 4.7</em> de
-        Anthropic.
+      <p style="margin:0 0 12px;color:var(--text3)">
+        Para verificación de desempeño, dimensionamiento de instalaciones o cualquier resultado con
+        consecuencias contractuales, use un simulador validado
+        (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">EnergyPlus · IES-VE · TAS · DesignBuilder</span>).
+      </p>
+
+      <p style="margin-bottom:6px">
+        Desarrollada mediante la aplicación de <strong style="color:var(--text)">Inteligencia Artificial</strong>
+        a través del modelo <em style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Claude Opus 4.7</em> de Anthropic.
       </p>
     </div>
 
-    <div style="background:var(--bg3);border-radius:6px;padding:14px 18px;border-left:3px solid var(--accent);font-size:.72rem;color:var(--text2);line-height:1.7;margin-top:10px">
+    <div style="background:var(--bg3);border-radius:6px;padding:14px 18px;border-left:3px solid var(--accent);font-size:.72rem;color:var(--text2);line-height:1.7;margin-top:14px">
       <div style="font-weight:700;color:var(--text);margin-bottom:6px;font-size:.76rem">📬 Contacto</div>
       <div><span style="font-family:var(--font-mono);color:var(--accent)">taller6.bio@gmail.com</span></div>
     </div>
 
     <div style="margin-top:20px;text-align:center;font-size:.62rem;color:var(--text3);font-family:var(--font-mono);line-height:1.6">
-      Métodos: CIBSE Admittance · ASHRAE 55 · ISO 6946 · ISO 13370<br>
+      Métodos: CIBSE Admittance · ASHRAE 55 · ISO 6946 · ISO 13370 · Liu–Jordan<br>
       Para detalles técnicos completos: <em>Ayuda → Manual técnico completo</em>
     </div>
   </div>
