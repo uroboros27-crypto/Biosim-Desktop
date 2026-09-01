@@ -4369,13 +4369,15 @@ canvas#cv{display:block;}
       </div>
       <!-- Sub-tabs -->
       <div style="display:flex;border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0">
-        <div class="ztab2 act" onclick="if(!document.getElementById('zoneDetail').classList.contains('open'))openZoneDetail(_zdZoneId);showZD('zdGen',this)">General</div>
-        <div class="ztab2" onclick="if(!document.getElementById('zoneDetail').classList.contains('open'))openZoneDetail(_zdZoneId);showZD('zdLoads',this)">Cargas</div>
-        <div class="ztab2" onclick="if(!document.getElementById('zoneDetail').classList.contains('open'))openZoneDetail(_zdZoneId);showZD('zdVent',this)">Ventil.</div>
-        <div class="ztab2" onclick="if(!document.getElementById('zoneDetail').classList.contains('open'))openZoneDetail(_zdZoneId);showZD('zdSched',this)">Horarios</div>
+        <div class="ztab2 act" id="zdTabGen"   onclick="if(!document.getElementById('zoneDetail').classList.contains('open'))openZoneDetail(_zdZoneId);showZD('zdGen',this)">General</div>
+        <div class="ztab2"     id="zdTabLoads" onclick="if(!document.getElementById('zoneDetail').classList.contains('open'))openZoneDetail(_zdZoneId);showZD('zdLoads',this)">Cargas</div>
+        <div class="ztab2"     id="zdTabVent"  onclick="if(!document.getElementById('zoneDetail').classList.contains('open'))openZoneDetail(_zdZoneId);showZD('zdVent',this)">Ventil.</div>
+        <div class="ztab2"     id="zdTabSched" onclick="if(!document.getElementById('zoneDetail').classList.contains('open'))openZoneDetail(_zdZoneId);showZD('zdSched',this)">Horarios</div>
+        <div class="ztab2"     id="zdTabShade" onclick="if(!document.getElementById('zoneDetail').classList.contains('open'))openZoneDetail(_zdZoneId);showZD('zdShade',this)" style="display:none">Sombra</div>
       </div>
       <!-- General -->
       <div id="zdGen" style="padding:4px 0">
+        <div id="zdTypeBanner" style="margin:2px 8px 6px;padding:4px 8px;border-radius:4px;font-size:.58rem;line-height:1.45"></div>
         <div class="zrow"><div class="zlbl">Nombre</div><input class="zinp" style="width:110px" id="zdName" onchange="zdSave('name',this.value)"></div>
         <div class="zrow"><div class="zlbl">Color</div><input type="color" id="zdColor" style="width:64px;height:22px;border-radius:3px;border:1px solid var(--border);cursor:pointer" onchange="zdSave('color',this.value);colorZona();renderZoneTree()"></div>
         <div class="zrow"><div class="zlbl">Volumen (m³)</div><input class="zinp" type="number" id="zdVol" min="1" onchange="zdSave('volume',Math.max(1,+this.value))"></div>
@@ -4548,6 +4550,41 @@ canvas#cv{display:block;}
         </div>
       </div>
       <!-- Horarios -->
+      <!-- v7.3: Sombra — solo visible cuando la zona es S -->
+      <div id="zdShade" class="h" style="padding:4px 0">
+        <div style="padding:6px 8px;font-size:.6rem;color:var(--text2);line-height:1.55;background:rgba(150,120,60,.07);border-left:3px solid rgba(150,120,60,.55);margin:0 8px 7px;border-radius:4px">
+          Fracción de radiación solar que <b>atraviesa</b> esta zona. Para vegetación y
+          para cualquier elemento de sombra no opaco: celosías, mallas, pérgolas, textiles,
+          paneles perforados.
+          <div style="margin-top:4px;color:var(--text3)">
+            Se aplica una vez por volumen atravesado, no por cara. Afecta a la radiación
+            directa, a la difusa y al factor de vista al cielo.
+          </div>
+        </div>
+        <div class="zrow">
+          <div class="zlbl">τ transmisividad</div>
+          <input type="range" id="zdTauRange" min="0" max="100" step="1" value="0"
+            style="flex:1;min-width:90px;cursor:pointer"
+            oninput="zdTauFromSlider(this.value)" onchange="zdTauCommit()">
+          <input class="zinp" type="number" id="zdTauNum" min="0" max="100" step="1" value="0"
+            style="width:52px;text-align:right"
+            oninput="zdTauFromNumber(this.value)" onchange="zdTauCommit()">
+          <span style="font-size:.6rem;color:var(--text3);padding-left:2px">%</span>
+        </div>
+        <div style="padding:2px 8px 6px;display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn btn-g btn-xs" onclick="zdTauSet(0)"  title="Muro, edificio vecino, panel macizo">0 % opaca</button>
+          <button class="btn btn-g btn-xs" onclick="zdTauSet(15)" title="Follaje perenne denso">15 % densa</button>
+          <button class="btn btn-g btn-xs" onclick="zdTauSet(30)" title="Árbol de hoja media, celosía cerrada">30 % media</button>
+          <button class="btn btn-g btn-xs" onclick="zdTauSet(50)" title="Malla de sombreo, pérgola de listones, caducifolio sin hoja">50 % ligera</button>
+        </div>
+        <div id="zdTauHint" style="padding:2px 8px 4px;font-size:.58rem;color:var(--text3);font-family:var(--font-mono)"></div>
+        <div style="padding:4px 8px 8px;font-size:.56rem;color:var(--text3);line-height:1.55;border-top:1px solid var(--border);margin:4px 8px 0">
+          <b style="color:var(--text2)">Referencia.</b> Follaje perenne denso 10–20 % ·
+          hoja media 25–35 % · caducifolio en invierno 50–70 % ·
+          malla de sombreo del 30 % → 30 % · celosía según su relación hueco/lleno.
+        </div>
+      </div>
+
       <div id="zdSched" class="h" style="padding:4px 0">
         <div class="zsec" style="margin-top:0">📅 Horarios de operación</div>
         <div style="display:flex;gap:3px;flex-wrap:wrap;padding:0 8px 4px">
@@ -9856,6 +9893,11 @@ function toggleZoneMode(id){
   invalidateSVFCache();
   // Repintar el panel de zona: las pestañas disponibles cambian con el tipo
   if(document.getElementById('rZoneContent')?.innerHTML.includes(z.id)) showZoneProps(z.id);
+  // v7.3: el panel de zona del panel izquierdo es el que ve el usuario.
+  if(typeof _zdZoneId !== 'undefined' && _zdZoneId === z.id &&
+     document.getElementById('zoneDetail')?.classList.contains('open')){
+    openZoneDetail(z.id);
+  }
   invalidateShadowCache();
   renderZoneTree();
   log(`Zona "${z.name}": ${z.thermal?'Térmica (T)':'Shader (S)'}`, z.thermal?'ok':'warn');
@@ -20482,6 +20524,11 @@ function openZoneDetail(zid){
   // Nombre en header
   document.getElementById('zdZoneName').textContent = '📦 ' + z.name;
 
+  // v7.3: la zona decide qué pestañas existen. Una zona S no tiene
+  // ocupación, cargas internas, ventilación ni horarios — no es un espacio
+  // habitable, es geometría que proyecta sombra.
+  zdApplyZoneType(z);
+
   // Populate General
   document.getElementById('zdName').value = z.name;
   document.getElementById('zdColor').value = z.color;
@@ -20521,9 +20568,102 @@ function openZoneDetail(zid){
   const vt = document.getElementById('zdVentTotal');
   if(vt) vt.textContent = (L.infiltACH + (L.ventACH||0)).toFixed(2) + ' ACH';
 
-  // Schedules
-  zdSchedType('occ', document.getElementById('zdst_occ'));
-  setTimeout(()=>zdDrawSched(), 40);
+  // Schedules (solo tienen sentido en zonas térmicas)
+  if(z.thermal){
+    zdSchedType('occ', document.getElementById('zdst_occ'));
+    setTimeout(()=>zdDrawSched(), 40);
+  }
+}
+
+// ── v7.3: interfaz condicionada al tipo de zona ────────────────────────
+function zdApplyZoneType(z){
+  const esT = z.thermal === true;
+  const set = (id, on) => { const e=document.getElementById(id); if(e) e.style.display = on ? '' : 'none'; };
+
+  set('zdTabLoads', esT);
+  set('zdTabVent',  esT);
+  set('zdTabSched', esT);
+  set('zdTabShade', !esT);
+
+  // Cartel de tipo en la pestaña General
+  const b = document.getElementById('zdTypeBanner');
+  if(b){
+    b.style.background = esT ? 'rgba(80,140,200,0.10)' : 'rgba(150,120,60,0.10)';
+    b.style.border     = '1px solid ' + (esT ? 'rgba(80,140,200,0.35)' : 'rgba(150,120,60,0.35)');
+    b.innerHTML = esT
+      ? `<b style="color:#3a6f9f">T · Zona térmica</b> — <span style="color:var(--text3)">entra en el balance térmico y en el análisis de radiación.</span>`
+      : `<b style="color:#8a6a2a">S · Zona de sombra</b> — <span style="color:var(--text3)">solo proyecta sombra. Sin cargas, ventilación ni horarios. Cámbiala a T en el árbol de zonas si necesitas esos parámetros.</span>`;
+  }
+
+  // Si la pestaña abierta ya no existe para este tipo, volver a General
+  const activa = document.querySelector('#zoneDetail .ztab2.act');
+  const oculta = activa && activa.style.display === 'none';
+  if(oculta || !activa) showZD('zdGen', document.getElementById('zdTabGen'));
+
+  if(!esT) zdTauRefresh(z);
+}
+
+// ── Controles de transmisividad: slider + campo numérico sincronizados ──
+// El slider y el número trabajan en porcentaje (0–100); el modelo guarda
+// τ en [0,1]. Mover cualquiera de los dos actualiza el otro en vivo; el
+// valor se confirma al soltar o al salir del campo, que es cuando se
+// invalidan los cachés (recalcularlos en cada píxel del slider sería
+// inútilmente caro).
+let _zdTauPending = null;
+
+function _zdZone(){ return zones.find(x => x.id === _zdZoneId) || null; }
+
+function zdTauRefresh(z){
+  z = z || _zdZone(); if(!z) return;
+  const pct = Math.round(zoneTau(z.id) * 100);
+  const r = document.getElementById('zdTauRange'), num = document.getElementById('zdTauNum');
+  if(r) r.value = pct;
+  if(num) num.value = pct;
+  _zdTauPending = null;
+  zdTauHint(pct);
+}
+
+function zdTauHint(pct){
+  const h = document.getElementById('zdTauHint'); if(!h) return;
+  const p = +pct;
+  const desc = p <= 0 ? 'opaca — bloquea toda la radiación'
+    : p >= 100 ? 'totalmente transparente — no proyecta sombra'
+    : `deja pasar el ${p}% · bloquea el ${100-p}%`;
+  h.textContent = `τ = ${(p/100).toFixed(2)} · ${desc}`;
+}
+
+function zdTauFromSlider(v){
+  const pct = Math.max(0, Math.min(100, Math.round(+v || 0)));
+  const num = document.getElementById('zdTauNum'); if(num) num.value = pct;
+  _zdTauPending = pct;
+  zdTauHint(pct);
+}
+
+function zdTauFromNumber(v){
+  // El campo puede quedar vacío mientras se escribe: no forzar 0 todavía.
+  if(v === '' || v === null){ _zdTauPending = null; return; }
+  const pct = Math.max(0, Math.min(100, Math.round(+v || 0)));
+  const r = document.getElementById('zdTauRange'); if(r) r.value = pct;
+  _zdTauPending = pct;
+  zdTauHint(pct);
+}
+
+function zdTauCommit(){
+  const z = _zdZone(); if(!z) return;
+  let pct = _zdTauPending;
+  if(pct === null || pct === undefined){
+    const num = document.getElementById('zdTauNum');
+    pct = Math.max(0, Math.min(100, Math.round(+(num?.value) || 0)));
+  }
+  setZoneTau(z.id, pct / 100);
+  zdTauRefresh(z);
+}
+
+function zdTauSet(pct){
+  const z = _zdZone(); if(!z) return;
+  _zdTauPending = pct;
+  setZoneTau(z.id, pct / 100);
+  zdTauRefresh(z);
 }
 
 // Save a zone property
@@ -20807,7 +20947,7 @@ function zdRefreshVent(){
 
 // Show sub-tab
 function showZD(tabId, btn){
-  ['zdGen','zdLoads','zdVent','zdSched'].forEach(id=>{
+  ['zdGen','zdLoads','zdVent','zdSched','zdShade'].forEach(id=>{
     const el=document.getElementById(id);
     if(el) el.classList.toggle('h', id!==tabId);
   });
