@@ -4615,6 +4615,8 @@ canvas#cv{display:block;}
           <button class="btn btn-g btn-xs" onclick="zdSchedFill(1)">Todo ON</button>
           <button class="btn btn-g btn-xs" onclick="zdSchedFill(0)">Todo OFF</button>
           <button class="btn btn-g btn-xs" onclick="zdSchedDefault()">Def. oficina</button>
+          <button class="btn btn-g btn-xs" onclick="zdSchedCopyOpen()"
+            title="Copiar el patrón semanal del horario activo a otros horarios de esta zona">⧉ Copiar…</button>
         </div>
         <div class="ztotal">
           <span style="color:var(--text3)">Horas activas / semana</span>
@@ -21100,6 +21102,136 @@ function zdSchedFill(v){
   const arr=zdGetSched(); if(!arr) return;
   arr.fill(v); zdDrawSched();
 }
+// ═══════════════════════════════════════════════════════════════════════
+//  COPIA DE HORARIOS ENTRE ESQUEMAS (v7.4)
+//
+//  Los seis horarios de una zona — ocupación, iluminación, equipos,
+//  ventilación, infiltración y contraventanas — suelen compartir el mismo
+//  patrón semanal. Redibujar 168 celdas a mano cinco veces es trabajo
+//  perdido y una fuente segura de incoherencias entre esquemas.
+//
+//  La copia es del PATRÓN (los 168 valores 0–1), no de las magnitudes:
+//  la potencia de iluminación, los ACH de ventilación o la R de las
+//  contraventanas siguen siendo las de cada apartado. Solo cambia
+//  CUÁNDO opera cada cosa.
+// ═══════════════════════════════════════════════════════════════════════
+const ZD_SCHED_ORDER = ['occ','light','equip','vent','infil','shutter'];
+
+// Resumen corto de un horario, para que el usuario vea qué va a machacar.
+function _zdSchedResumen(zid, type){
+  const arr = getZoneSched(zid, type);
+  if(!arr) return '—';
+  let horas = 0;
+  for(let i=0;i<arr.length;i++) horas += arr[i];
+  return `${horas.toFixed(0)} h/sem`;
+}
+
+function zdSchedCopyOpen(){
+  const z = zones.find(x=>x.id===_zdZoneId);
+  if(!z){ log('Abre primero una zona para copiar sus horarios.','warn'); return; }
+  if(!z.thermal){ log('Los horarios solo existen en zonas térmicas (T).','warn'); return; }
+  ensureZoneLoads(z);
+  document.getElementById('zdSchedCopyModal')?.remove();
+
+  const origen = _zdSchedType;
+  const destinos = ZD_SCHED_ORDER.filter(t => t !== origen).map(t => `
+    <label style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:.72rem;color:var(--text2)"
+      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='none'">
+      <input type="checkbox" class="zdcp-dst" value="${t}" style="cursor:pointer">
+      <span style="flex:1">${ZD_SCHED_LABELS[t]}</span>
+      <span style="font-family:var(--font-mono);font-size:.62rem;color:var(--text3)">${_zdSchedResumen(z.id, t)}</span>
+    </label>`).join('');
+
+  document.body.insertAdjacentHTML('beforeend', `
+  <div id="zdSchedCopyModal" style="position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.55);
+       display:flex;align-items:center;justify-content:center;padding:20px"
+       onclick="if(event.target===this)this.remove()">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+         width:min(430px,94vw);box-shadow:0 20px 50px rgba(0,0,0,.6);padding:18px 20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-weight:700;font-size:.86rem;color:var(--text)">⧉ Copiar horario</span>
+        <button style="background:none;border:none;font-size:1.25rem;color:var(--text3);cursor:pointer;line-height:1;padding:0 4px"
+          onclick="document.getElementById('zdSchedCopyModal').remove()">✕</button>
+      </div>
+
+      <div style="font-size:.72rem;color:var(--text2);line-height:1.6;margin-bottom:12px">
+        Copiar el patrón semanal de
+        <b style="color:var(--accent)">${ZD_SCHED_LABELS[origen]}</b>
+        <span style="font-family:var(--font-mono);font-size:.64rem;color:var(--text3)">(${_zdSchedResumen(z.id, origen)})</span>
+        a los horarios que marques, dentro de la zona <b style="color:var(--text)">${z.name}</b>.
+      </div>
+
+      <div style="font-size:.64rem;color:var(--text3);margin-bottom:6px">Origen</div>
+      <select class="psel" id="zdcpSrc" style="width:100%;font-size:.72rem;margin-bottom:12px"
+        onchange="zdSchedCopyOpenFrom(this.value)">
+        ${ZD_SCHED_ORDER.map(t=>`<option value="${t}"${t===origen?' selected':''}>${ZD_SCHED_LABELS[t]} · ${_zdSchedResumen(z.id,t)}</option>`).join('')}
+      </select>
+
+      <div style="font-size:.64rem;color:var(--text3);margin-bottom:4px">Destino — se sobrescribe por completo</div>
+      <div style="border:1px solid var(--border);border-radius:5px;padding:3px;margin-bottom:10px">
+        ${destinos}
+      </div>
+
+      <div style="display:flex;gap:4px;margin-bottom:12px">
+        <button class="btn btn-g btn-xs" onclick="document.querySelectorAll('.zdcp-dst').forEach(c=>c.checked=true)">Marcar todos</button>
+        <button class="btn btn-g btn-xs" onclick="document.querySelectorAll('.zdcp-dst').forEach(c=>c.checked=false)">Ninguno</button>
+      </div>
+
+      <div style="font-size:.62rem;color:var(--text3);line-height:1.55;background:var(--bg3);border-radius:4px;padding:7px 9px;margin-bottom:14px">
+        Se copia <b style="color:var(--text2)">cuándo</b> opera cada sistema, no <b style="color:var(--text2)">cuánto</b>:
+        la potencia de iluminación, los caudales y la resistencia de las contraventanas no se tocan.
+        Esta acción no se puede deshacer.
+      </div>
+
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button class="btn btn-g btn-sm" onclick="document.getElementById('zdSchedCopyModal').remove()">Cancelar</button>
+        <button class="btn btn-a btn-sm" onclick="zdSchedCopyApply()">Copiar</button>
+      </div>
+    </div>
+  </div>`);
+}
+
+// Al cambiar el origen en el desplegable hay que rehacer la lista de
+// destinos, porque el origen ya no puede figurar entre ellos.
+function zdSchedCopyOpenFrom(t){
+  const marcados = [...document.querySelectorAll('.zdcp-dst')].filter(c=>c.checked).map(c=>c.value);
+  _zdSchedType = t;
+  zdSchedType(t, document.getElementById('zdst_'+t));   // refleja el cambio en el editor
+  zdSchedCopyOpen();
+  document.querySelectorAll('.zdcp-dst').forEach(c=>{ if(marcados.includes(c.value)) c.checked = true; });
+}
+
+function zdSchedCopyApply(){
+  const z = zones.find(x=>x.id===_zdZoneId);
+  if(!z){ document.getElementById('zdSchedCopyModal')?.remove(); return; }
+  const origen = document.getElementById('zdcpSrc')?.value || _zdSchedType;
+  const dst = [...document.querySelectorAll('.zdcp-dst')].filter(c=>c.checked).map(c=>c.value);
+  if(dst.length === 0){ log('Marca al menos un horario de destino.','warn'); return; }
+
+  const src = getZoneSched(z.id, origen);
+  if(!src){ log('No se pudo leer el horario de origen.','err'); return; }
+
+  let ok = 0;
+  dst.forEach(t => {
+    if(t === origen) return;                       // no copiarse sobre sí mismo
+    const copia = Float32Array.from(src);          // copia por valor, no la misma referencia
+    if(t === 'shutter'){
+      if(!z._loads.shutters) z._loads.shutters = {surfIds:[], R:0.20, schedShutter:defaultSched('shutter')};
+      z._loads.shutters.schedShutter = copia;
+    } else {
+      z._loads[SCHED_KEYS[t]] = copia;
+    }
+    ok++;
+  });
+
+  document.getElementById('zdSchedCopyModal')?.remove();
+  zdDrawSched();
+  const horas = Array.from(src).reduce((a,b)=>a+b,0);
+  log(`Horario de ${ZD_SCHED_LABELS[origen]} (${horas.toFixed(0)} h/sem) copiado a ${ok} esquema(s): ` +
+      dst.filter(t=>t!==origen).map(t=>ZD_SCHED_LABELS[t]).join(', ') +
+      `. Vuelve a simular para ver el efecto.`, 'ok');
+}
+
 function zdSchedDefault(){
   const z=zones.find(x=>x.id===_zdZoneId); if(!z) return;
   ensureZoneLoads(z);
