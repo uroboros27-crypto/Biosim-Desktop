@@ -4892,7 +4892,8 @@ canvas#cv{display:block;}
           <button class="btn btn-g btn-xs" onclick="exportTabPDF('bConf','Análisis de Confort Térmico')">⬇ PDF</button>
         </div>
         <div style="font-size:.6rem;color:var(--text3);font-family:var(--font-mono);padding:2px 4px;margin-bottom:2px">
-          🌡 Confort Adaptativo ASHRAE 55-2010 — % horas dentro de banda de aceptabilidad 80% y 90% por mes
+          🌡 Confort Adaptativo ASHRAE 55-2010 — % de <b>horas ocupadas</b> dentro de las bandas de aceptabilidad 80% y 90%, por mes
+          <span id="confScopeLbl" style="color:var(--accent)"></span>
         </div>
         <div class="chart-w"><canvas id="cConf"></canvas></div>
       </div>
@@ -19567,6 +19568,55 @@ function graficarPerfil(){
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  MÁSCARA DE HORAS OCUPADAS (v7.5)
+//
+//  El confort se evalúa SOLO sobre las horas en que la zona está ocupada.
+//  Es lo que hacen ASHRAE 55, CIBSE TM52/TM59 y EN 16798-1: una molestia
+//  térmica a las 3 de la madrugada en una oficina vacía no es una molestia.
+//  Evaluar las 8760 h además sesga el resultado al alza, porque las horas
+//  nocturnas suelen caer dentro de la banda y disimulan el sobrecalentamiento
+//  diurno.
+//
+//  La máscara es BINARIA, igual que en TM52: una celda de ocupación parcial
+//  (0.15, 0.5) cuenta como hora ocupada completa. No se pondera por el nivel
+//  de ocupación.
+//
+//  Convención de calendario: el día 1 del año es lunes (dow = doy % 7), que
+//  es la convención del año tipo EPW. Los fines de semana del modelo no
+//  coinciden con los de ningún año concreto.
+//
+//  Antes esta función vivía dentro de graficarC() y solo la usaban dos de
+//  los cinco cálculos de confort de la aplicación, de modo que la gráfica
+//  mensual, la tabla del informe y el panel de estadísticas daban cifras
+//  distintas para el mismo modelo.
+// ═══════════════════════════════════════════════════════════════════════
+function buildOccMask(z){
+  if(!z || !z._loads || !z._loads.schedOcc) return null;
+  const sched = z._loads.schedOcc;
+  const mask = new Uint8Array(8760);
+  let h = 0, total = 0;
+  for(let doy=0; doy<365; doy++){
+    const dow = doy % 7;
+    for(let hod=0; hod<24; hod++, h++){
+      const on = sched[dow*24 + hod] > 0 ? 1 : 0;
+      mask[h] = on; total += on;
+    }
+  }
+  // Horario de ocupación vacío: no hay denominador. Se evalúa el año
+  // completo y se avisa, en vez de mostrar un guion sin explicación.
+  if(total === 0) return null;
+  mask._occHours = total;
+  return mask;
+}
+
+// Devuelve la etiqueta con la que se rotula cualquier cifra de confort.
+function occScopeLabel(mask){
+  return mask
+    ? `${mask._occHours} h ocupadas`
+    : '8760 h (sin horario de ocupación)';
+}
+
 // ── ASHRAE 55-2010 Adaptive Comfort Model ────────────────────────────────
 // T_op_neu = 0.31 * T_rm + 17.8  (neutral operative temperature)
 // Acceptable range 80%: ±3.5°C | 90%: ±2.5°C
@@ -19627,22 +19677,9 @@ function graficarC(){
   // Comfort threshold
   const COMFORT_THRESHOLD = 50;
 
-  // Helper: occupied-hours mask for a thermal zone by its index in thermalZones[]
-  function getOccMask(tzi){
-    const z = thermalZones[tzi]; if(!z) return null;
-    if(z._loads && z._loads.schedOcc){
-      const mask=new Array(8760).fill(0);
-      let h=0;
-      for(let doy=0;doy<365;doy++){
-        const dow=doy%7;
-        for(let hod=0;hod<24;hod++,h++){
-          mask[h]=z._loads.schedOcc[dow*24+hod]>0?1:0;
-        }
-      }
-      return mask;
-    }
-    return null;
-  }
+  // v7.5: delega en buildOccMask (global), compartida por TODOS los
+  // cálculos de confort para que ninguno quede fuera del filtro.
+  function getOccMask(tzi){ return buildOccMask(thermalZones[tzi]); }
 
   // Build chart datasets — one pair of bars (80%/90%) per thermal zone.
   // v3.5: el color de cada barra refleja el ESTADO predominante de ese mes
@@ -19767,6 +19804,14 @@ function graficarC(){
     monthPct80.push(p80); monthPct90.push(p90);
     hh+=d*24;
   });
+
+  // v7.5: rotular bajo la gráfica sobre cuántas horas se ha evaluado.
+  const _scopeLbl = document.getElementById('confScopeLbl');
+  if(_scopeLbl){
+    _scopeLbl.textContent = occMask0
+      ? ` · ${occMask0._occHours} h ocupadas de 8760`
+      : ' · sin horario de ocupación: se evalúan las 8760 h';
+  }
 
   const existingTbl=document.getElementById('confortTbl');
   if(existingTbl) existingTbl.remove();
@@ -19897,8 +19942,13 @@ function graficarC(){
   let h3=0;
   const uncomfMonths=[];
   dias2.forEach((d,mi)=>{
-    const sl=results[0]?results[0].slice(h3,h3+d*24):[];
+    const slAll=results[0]?results[0].slice(h3,h3+d*24):[];
+    // v7.5: este bloque recorría el mes completo sin máscara, así que el
+    // texto de diagnóstico contradecía a la tabla mensual que tiene justo
+    // encima, calculada sobre horas ocupadas.
+    const sl = occMask0 ? slAll.filter((_,i)=>occMask0[h3+i]>0) : slAll;
     const L=limitsPerMonth[mi];
+    if(sl.length===0){ h3+=d*24; return; }   // mes sin horas ocupadas
     const p=(sl.filter(t=>t>=L.min80&&t<=L.max80).length/sl.length*100);
     if(p<50) uncomfMonths.push({mi, p:p.toFixed(0), TiMean:(sl.reduce((a,b)=>a+b,0)/sl.length).toFixed(1), Tmax80:L.max80.toFixed(1)});
     h3+=d*24;
@@ -19927,11 +19977,25 @@ function graficarC(){
         📍 ${concZoneName}
       </span>
       <span style="font-size:.56rem;color:#3a7a3a;background:rgba(40,140,60,0.12);border:1px solid rgba(40,140,60,0.3);border-radius:10px;padding:2px 8px">
-        ${usingOccFilter ? '🕐 Evaluado en horas de ocupación (schedOcc)' : '⚠ Evaluado en las 8760 h — sin schedOcc definido'}
+        ${usingOccFilter
+          ? `🕐 Evaluado sobre ${occMask0._occHours} h ocupadas de 8760 (${(occMask0._occHours/87.60).toFixed(0)}% del año)`
+          : '⚠ Sin horario de ocupación — evaluado sobre las 8760 h'}
       </span>
     </div>
 
     <div style="background:rgba(30,80,200,0.10);border-left:3px solid rgba(60,120,220,0.7);border-radius:0 5px 5px 0;padding:6px 10px;margin-bottom:10px;color:#1a2a4a;font-size:.60rem">
+      <b style="color:#0a2060">Sobre qué horas se mide.</b><br>
+      ${usingOccFilter
+        ? `Todos los porcentajes de esta sección y de la tabla mensual se calculan <b>únicamente sobre las horas
+           en que la zona está ocupada</b> según su horario de ocupación: <b>${occMask0._occHours} h</b> de las 8760 del año.
+           Es el criterio de ASHRAE 55, CIBSE TM52/TM59 y EN 16798-1 — una molestia térmica en un local vacío no
+           es una molestia. Evaluar el año completo además <b>sobrestima</b> el confort, porque las horas nocturnas
+           suelen caer dentro de la banda y ocultan el sobrecalentamiento diurno.
+           La máscara es binaria: una hora de ocupación parcial cuenta igual que una de ocupación plena.`
+        : `Esta zona <b>no tiene horario de ocupación definido</b>, así que los porcentajes se calculan sobre las
+           8760 h del año. Eso incluye noches y fines de semana, y tiende a <b>sobrestimar</b> el confort.
+           Define el horario de ocupación en el panel de zona para obtener una evaluación conforme a ASHRAE 55.`}
+      <br><br>
       <b style="color:#0a2060">¿Qué mide este estándar?</b><br>
       ASHRAE 55-2010 Modelo Adaptativo evalúa si los ocupantes estarían cómodos en un edificio de ventilación natural.
       Define una <b>temperatura de neutralidad</b> (T_neu = 0.31 × T_rm + 17.8°C) basada en la temperatura media exterior del mes,
@@ -20161,17 +20225,33 @@ function mostrarStats(){
   const absMax = safeMax(_flatAll);
 
   // ── Global ASHRAE 80% comfort % ───────────────────────────────────
-  let inConf=0, totalHours=0;
-  validPairs.forEach(({arr})=>{
+  // v7.5: evaluado SOLO sobre horas ocupadas, igual que la gráfica y la
+  // tabla mensual. Antes recorría las 8760 h sin máscara y daba una cifra
+  // incompatible con el resto de la aplicación.
+  let inConf=0, totalHours=0, inConfAll=0, totalAll=0;
+  let algunaZonaSinHorario = false;
+  validPairs.forEach(({arr, zone})=>{
+    const mask = buildOccMask(zone);
+    if(!mask) algunaZonaSinHorario = true;
     arr.forEach((t,hi)=>{
       const calHi=(window._simH0||0)+hi;
       const mi=hourMonth[Math.min(calHi,8759)]||0;
       const L=limMo[mi];
-      if(t>=L.min80&&t<=L.max80) inConf++;
+      const dentro = (t>=L.min80 && t<=L.max80);
+      if(dentro) inConfAll++;
+      totalAll++;
+      if(mask && !mask[Math.min(calHi,8759)]) return;   // hora no ocupada
+      if(dentro) inConf++;
       totalHours++;
     });
   });
-  const gpConf=(inConf/totalHours*100).toFixed(1);
+  const gpConf    = totalHours>0 ? (inConf/totalHours*100).toFixed(1) : '—';
+  const gpConfAll = totalAll>0   ? (inConfAll/totalAll*100).toFixed(1) : '—';
+  const _occTotal = validPairs.reduce((a,{zone})=>{
+    const m = buildOccMask(zone); return a + (m ? m._occHours : 8760); }, 0);
+  const _occScope = algunaZonaSinHorario
+    ? 'todas las horas (alguna zona sin horario de ocupación)'
+    : `${totalHours} h ocupadas de ${totalAll}`;
 
   // ── Exterior (EPW) daily stats ────────────────────────────────────
   const epwDailyMins=[], epwDailyMaxs=[], epwDailyMeans=[];
@@ -20189,6 +20269,7 @@ function mostrarStats(){
   let html=`
   <div style="font-size:.6rem;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px;padding:4px 6px;background:var(--bg3);border-radius:4px">
     Método: <b>ASHRAE 55-2010 Confort Adaptativo</b> (80% aceptabilidad) · T_op ≈ T_ai (solo temp. aire)<br>
+    Confort evaluado sobre <b>${_occScope}</b>${algunaZonaSinHorario ? '' : ` · sobre las 8760 h daría ${gpConfAll}%`}<br>
     T. exterior EPW (promedio diario): mín ${gTextMin}°C · máx ${gTextMax}°C · media ${gTextMed}°C
   </div>
   <div style="font-size:.58rem;color:var(--text3);font-family:var(--font-mono);margin-bottom:6px;padding:3px 6px;background:rgba(74,144,220,0.07);border-left:2px solid var(--accent);border-radius:0 3px 3px 0">
@@ -20200,7 +20281,7 @@ function mostrarStats(){
       {l:'T mín típica',  sub:'media de mín. diarias', v:gn.toFixed(1)+'°C', c:'#4488cc'},
       {l:'T máx típica',  sub:'media de máx. diarias', v:gx.toFixed(1)+'°C', c:'#cc6644'},
       {l:'T media',       sub:'media de medias diarias',v:gm.toFixed(1)+'°C', c:'#44aa88'},
-      {l:'Confort 80%',   sub:'% horas anuales',        v:gpConf+'%',         c:'#88aa44'}
+      {l:'Confort 80%',   sub:_occScope,                v:gpConf+'%',         c:'#88aa44'}
     ].map(x=>`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:5px 8px;font-family:var(--font-mono);font-size:.65rem;text-align:center">
       <div style="color:var(--text3);font-size:.52rem;margin-bottom:1px">${x.l}</div>
       <div style="color:${x.c};font-weight:700;font-size:.82rem">${x.v}</div>
@@ -20232,16 +20313,21 @@ function mostrarStats(){
     for(let d=0;d<simDays;d++) ampSum += dailyMaxs[d] - dailyMins[d];
     const ampMed = simDays>0 ? (ampSum/simDays).toFixed(1) : '—';
 
-    let in80=0, in90=0;
+    // v7.5: filtradas por horas ocupadas de ESTA zona.
+    const _mz = buildOccMask(zoneObj);
+    let in80=0, in90=0, nEval=0;
     z.forEach((t,hi)=>{
       const calHi=(window._simH0||0)+hi;
+      if(_mz && !_mz[Math.min(calHi,8759)]) return;
       const mi=hourMonth[Math.min(calHi,8759)]||0;
       const L=limMo[mi];
       if(t>=L.min80&&t<=L.max80) in80++;
       if(t>=L.min90&&t<=L.max90) in90++;
+      nEval++;
     });
-    const pc80=(in80/z.length*100).toFixed(1);
-    const pc90=(in90/z.length*100).toFixed(1);
+    const pc80 = nEval>0 ? (in80/nEval*100).toFixed(1) : '—';
+    const pc90 = nEval>0 ? (in90/nEval*100).toFixed(1) : '—';
+    const _hLbl = _mz ? `${nEval} h ocup.` : `${nEval} h (sin horario)`;
 
     html+=`<tr>
       <td><span style="color:${zoneObj.color||'#fff'}">■</span> ${zoneObj.name}</td>
@@ -20249,8 +20335,8 @@ function mostrarStats(){
       <td>${mxTyp.toFixed(1)}°C</td>
       <td>${meTyp.toFixed(1)}°C</td>
       <td>${ampMed}°C</td>
-      <td style="color:${parseFloat(pc80)>70?'#66aa44':parseFloat(pc80)>40?'#aaaa44':'#cc5544'}">${pc80}%</td>
-      <td style="color:${parseFloat(pc90)>70?'#66aa44':parseFloat(pc90)>40?'#aaaa44':'#cc5544'}">${pc90}%</td>
+      <td style="color:${parseFloat(pc80)>70?'#66aa44':parseFloat(pc80)>40?'#aaaa44':'#cc5544'}" title="Sobre ${_hLbl}">${pc80}%<div style="font-size:.5rem;color:#7a8aaa;font-weight:400">${_hLbl}</div></td>
+      <td style="color:${parseFloat(pc90)>70?'#66aa44':parseFloat(pc90)>40?'#aaaa44':'#cc5544'}" title="Sobre ${_hLbl}">${pc90}%</td>
     </tr>`;
   });
 
