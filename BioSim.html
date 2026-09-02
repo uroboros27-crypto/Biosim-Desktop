@@ -8164,6 +8164,12 @@ function registrar(geometrias, opts){
   // (opts.recenter===false). Por defecto sigue el comportamiento legacy de
   // recentrar — esto evita que geometrías con coords absolutas (p.ej.
   // exportadas desde SketchUp con coords geográficas) queden lejos del origen.
+  // v7.6: el modo 'replace' desplaza el modelo por (centroXZ, minY). Ese
+  // desplazamiento se OLVIDABA, así que cualquier pieza importada después
+  // de forma aditiva conservaba sus coordenadas originales del archivo y
+  // caía descolocada respecto a la base ya recentrada. Ahora se guarda como
+  // origen del modelo y sirve de referencia para las importaciones
+  // siguientes.
   const wantRecenter = mode === 'replace' && opts.recenter !== false;
   if(wantRecenter){
     const allBBox = new THREE.Box3();
@@ -8178,6 +8184,10 @@ function registrar(geometrias, opts){
     offsetX = importCenter.x;
     offsetY = allBBox.min.y;
     offsetZ = importCenter.z;
+    modelOrigin = {x:offsetX, y:offsetY, z:offsetZ, src:(opts.sourceName || fname || 'modelo base')};
+  } else if(mode === 'replace'){
+    // Reemplazo sin recentrar: el origen del modelo es el del archivo.
+    modelOrigin = {x:0, y:0, z:0, src:(opts.sourceName || fname || 'modelo base')};
   }
 
   // Matriz de rotación alrededor del eje Y (vertical) para modo aditivo
@@ -8194,7 +8204,10 @@ function registrar(geometrias, opts){
       }
       return { x: vx, y: vy, z: vz };
     } else {
-      // Aditivo: escala primero, luego rotación Y, luego offset usuario
+      // Aditivo: escala primero, luego rotación Y, luego offset usuario.
+      // El offset va en metros del MODELO, no del archivo, así que se aplica
+      // después de escalar y rotar — que es lo que espera la casilla de
+      // alineación con el modelo base.
       let x = vx * scale, y = vy * scale, z = vz * scale;
       const xr = x*cosA - z*sinA;
       const zr = x*sinA + z*cosA;
@@ -8989,6 +9002,25 @@ function _showImportAddDialog(){
         ${suggestedUnit!=='m' ? `<span style="color:#c70;font-weight:600">⚠ Modelo grande (max ${maxDim.toFixed(0)}). Probable unidad: ${suggestedUnit}. Escala sugerida: ${suggestedScale}</span>` : '<span style="color:#393">Tamaño coherente con metros (sin conversión necesaria).</span>'}
       </div>
 
+      ${modelOrigin ? `
+      <div style="background:#eef6ff;border:1px solid #b8d4f0;border-radius:5px;padding:7px 10px;margin-bottom:8px;font-size:.66rem;line-height:1.55;color:#20406a">
+        <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;font-weight:600">
+          <input type="checkbox" id="imAddAlign" checked onchange="_imAddAlignToggle()" style="margin-top:2px;cursor:pointer">
+          <span>Alinear con el modelo base
+            <span style="display:block;font-weight:400;color:#40607a;margin-top:2px">
+              Al abrir <b>${modelOrigin.src}</b>, BioSim lo desplazó
+              (${(-modelOrigin.x).toFixed(2)}, ${(-modelOrigin.y).toFixed(2)}, ${(-modelOrigin.z).toFixed(2)}) m
+              para centrarlo y apoyarlo en Y=0. Si esta pieza viene del mismo archivo,
+              se le aplica el mismo desplazamiento y cae en su sitio.
+            </span>
+          </span>
+        </label>
+      </div>` : `
+      <div style="background:#f4f4f0;border:1px solid #ddd;border-radius:5px;padding:6px 10px;margin-bottom:8px;font-size:.62rem;color:#666;line-height:1.5">
+        Se conservarán las coordenadas absolutas del archivo. No hay un modelo base
+        importado con desplazamiento conocido con el que alinear.
+      </div>`}
+
       <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;margin-bottom:8px">
         <label style="font-weight:600">Unidades del archivo</label>
         <select id="imAddUnits" onchange="_imAddOnUnitChange()" style="padding:3px 6px;border-radius:4px;border:1px solid #c8d0e0;font-size:.7rem">
@@ -9037,6 +9069,32 @@ function _showImportAddDialog(){
     </div>
   `;
   document.body.appendChild(dlg);
+  // v7.6: sembrar los offsets con la alineación al modelo base (casilla
+  // marcada por defecto), para que el usuario vea ya los valores correctos.
+  if(modelOrigin) _imAddAlignToggle();
+}
+
+// ── v7.6: alineación con el modelo base ────────────────────────────────
+// Al importar el modelo base en modo 'replace', BioSim lo desplaza para
+// centrarlo en XZ y apoyar su base en Y=0. Ese desplazamiento queda en
+// modelOrigin. Una pieza que venga del MISMO archivo trae coordenadas del
+// archivo original, así que hay que restarle el mismo desplazamiento para
+// que caiga donde le corresponde. Esta casilla lo hace, y viene marcada
+// por defecto porque es el caso habitual.
+function _imAddAlignToggle(){
+  const on = document.getElementById('imAddAlign')?.checked;
+  const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.value = (+v).toFixed(3); };
+  if(on && modelOrigin){
+    set('imAddOffX', -modelOrigin.x);
+    set('imAddOffY', -modelOrigin.y);
+    set('imAddOffZ', -modelOrigin.z);
+  } else {
+    set('imAddOffX', 0); set('imAddOffY', 0); set('imAddOffZ', 0);
+  }
+  const dis = !!on;
+  ['imAddOffX','imAddOffY','imAddOffZ'].forEach(id=>{
+    const e=document.getElementById(id); if(e){ e.disabled = dis; e.style.opacity = dis?0.55:1; }
+  });
 }
 
 function _imAddOnUnitChange(){
@@ -11561,6 +11619,12 @@ const SNAP_BASE_RADIUS=22;  // radio base en pixels (a camR de referencia)
 const SNAP_CAM_REF=20;      // camR de referencia para radio adaptativo
 
 // Cache de candidatos snap
+// v7.6 — Desplazamiento que se aplicó al modelo base al importarlo en modo
+// 'replace'. Un vértice del archivo original en (vx,vy,vz) vive en BioSim en
+// (vx−x, vy−y, vz−z). Guardarlo permite alinear importaciones posteriores
+// procedentes del mismo archivo sin que el usuario tenga que medir nada.
+let modelOrigin = null;
+
 let _snapCache=null;
 let _snapCacheDirty=true;
 function invalidateSnapCache(){ _snapCacheDirty=true; }
@@ -11577,6 +11641,12 @@ function _snapRebuildCache(){
 
   surfaces.forEach(s=>{
     if(!s.mesh || s.mesh.name==='__ghost__' || s.mesh.name==='__axisLine__') return;
+    // v7.6: no generar puntos de snap sobre geometría que el usuario no ve.
+    // Antes el caché incluía las zonas apagadas y bloqueadas, así que el
+    // cursor se enganchaba a vértices invisibles situados detrás del modelo.
+    if(s.mesh.visible === false) return;
+    if(typeof isSurfaceHidden === 'function' && isSurfaceHidden(s)) return;
+    if(typeof isSurfaceLocked === 'function' && isSurfaceLocked(s)) return;
     const geo=s.mesh.geometry;
     const posAttr=geo.attributes.position;
     if(!posAttr) return;
@@ -11651,73 +11721,216 @@ function _snapRebuildCache(){
   _snapCacheDirty=false;
 }
 
-function detectSnap(cursorPt, px, py, w, h){
-  if(_snapCacheDirty || !_snapCache) _snapRebuildCache();
+// ═══════════════════════════════════════════════════════════════════════
+//  DETECCIÓN DE SNAP (v7.6 — reescrita para fluidez)
+//
+//  Problemas de la versión anterior, todos visibles con el ratón en la mano:
+//
+//  1. PRIORIDAD POR ENCIMA DE DISTANCIA. El orden era `pri` y sólo después
+//     la distancia en pantalla, de modo que un vértice FINAL a 37 px ganaba
+//     siempre a una ARISTA a 1 px. El cursor pegaba tirones hacia esquinas
+//     lejanas en vez de engancharse a lo que se estaba señalando. Ahora se
+//     puntúa con la distancia menos una bonificación por tipo: el tipo
+//     desempata, no manda.
+//
+//  2. PARPADEO ENTRE CANDIDATOS. Sin histéresis, dos puntos casi
+//     equidistantes se turnaban con cada píxel de movimiento. Ahora el snap
+//     activo se mantiene mientras siga dentro del radio ampliado un 35%.
+//
+//  3. COSTE Y BASURA. Se reproyectaban los ~8.700 puntos del caché en CADA
+//     mousemove y se creaban unos 14.000 Vector3 por movimiento. Ahora las
+//     proyecciones se calculan una sola vez por posición de cámara y se
+//     guardan en arrays tipados; mover el ratón sin girar la vista no
+//     reproyecta nada. Los vectores de trabajo son de módulo, no por
+//     iteración.
+//
+//  4. PUNTOS A LA ESPALDA DE LA CÁMARA. project() divide por w sin mirar el
+//     signo, así que geometría situada detrás del observador aterrizaba en
+//     pantalla con las coordenadas invertidas y generaba snaps fantasma.
+//     Ahora se descartan comprobando w.
+//
+//  5. ARISTAS. Se resolvía la geometría 3D completa de las 3.566 aristas
+//     antes de descartarlas por distancia. Ahora se hace primero la prueba
+//     barata en 2D contra el segmento proyectado y sólo se resuelve en 3D
+//     la ganadora.
+// ═══════════════════════════════════════════════════════════════════════
 
-  const cam=activeCamera ? activeCamera() : camera;
-  const snapR=_snapGetRadius();
+// Proyecciones cacheadas — se recalculan sólo cuando cambia la cámara.
+let _snapProj = null;          // {vx,vy,vok, ex1,ey1,ex2,ey2,eok, key}
+let _snapProjKey = '';
 
-  function screenDist(worldPt){
-    const {sx,sy}=worldToScreen(worldPt,w,h);
-    return Math.sqrt((sx-px)**2+(sy-py)**2);
-  }
-  function camDepth(worldPt){ return cam.position.distanceTo(worldPt); }
-
-  const candidates=[];
-
-  // Candidatos desde cache (vertices, midpoints, centroides)
-  _snapCache.verts.forEach(c=>{
-    const d=screenDist(c.pt);
-    if(d<=snapR) candidates.push({...c, d, depth:camDepth(c.pt)});
-  });
-
-  // Snap sobre aristas: punto mas cercano del rayo de camara al segmento 3D
-  const ndc=_lastCursorNDC || {x:(px/w)*2-1, y:-(py/h)*2+1};
-  const raycaster=new THREE.Raycaster();
-  raycaster.setFromCamera(ndc, cam);
-  const rayOrig=raycaster.ray.origin;
-  const rayDir=raycaster.ray.direction.clone().normalize();
-
-  _snapCache.edges.forEach(([a,b])=>{
-    const ab=new THREE.Vector3().subVectors(b,a);
-    const ao=new THREE.Vector3().subVectors(a,rayOrig);
-    const abLen2=ab.dot(ab); if(abLen2<1e-8) return;
-    const d1=ab.dot(rayDir), d2=ab.dot(ao), d3=rayDir.dot(ao);
-    const denom=abLen2-d1*d1;
-    let t=0;
-    if(Math.abs(denom)>1e-8) t=Math.max(0,Math.min(1,(d1*d3-d2)/denom));
-    const closestOnEdge=a.clone().addScaledVector(ab,t);
-    const d=screenDist(closestOnEdge);
-    if(d<=snapR && t>0.04 && t<0.96){
-      candidates.push({pt:closestOnEdge, type:'edge', label:'ARISTA', pri:2.5, d, depth:camDepth(closestOnEdge)});
-    }
-  });
-
-  // Puntos de polilinea en curso
-  polyPts.forEach((p,i)=>{
-    const d=screenDist(p);
-    if(d<=snapR) candidates.push({pt:p.clone(),type:'end',label:'NODO',pri:1,d,depth:camDepth(p)});
-    if(i>0){
-      const mid=new THREE.Vector3().addVectors(polyPts[i-1],p).multiplyScalar(0.5);
-      const dm=screenDist(mid);
-      if(dm<=snapR) candidates.push({pt:mid,type:'mid',label:'MEDIO',pri:2,d:dm,depth:camDepth(mid)});
-    }
-  });
-  if(polyPts.length>=3){
-    const d=screenDist(polyPts[0]);
-    if(d<=snapR) candidates.push({pt:polyPts[0].clone(),type:'end',label:'CERRAR',pri:0,d,depth:camDepth(polyPts[0])});
-  }
-
-  if(candidates.length===0) return null;
-
-  // Seleccionar mejor: prioridad -> distancia pantalla -> profundidad camara
-  candidates.sort((a,b)=>{
-    if(a.pri!==b.pri) return a.pri-b.pri;
-    if(Math.abs(a.d-b.d)>2) return a.d-b.d;
-    return a.depth-b.depth;
-  });
-  return candidates[0];
+const _spV4 = new THREE.Vector4();
+function _projectPoint(p, cam, out){
+  _spV4.set(p.x, p.y, p.z, 1)
+       .applyMatrix4(cam.matrixWorldInverse)
+       .applyMatrix4(cam.projectionMatrix);
+  const w4 = _spV4.w;
+  if(w4 <= 1e-6 && cam.isPerspectiveCamera){ out.ok = false; return out; }
+  out.ok = true;
+  out.x = _spV4.x / w4;
+  out.y = _spV4.y / w4;
+  return out;
 }
+const _spTmp = {x:0, y:0, ok:false};
+
+// Clave que identifica el estado de proyección: si no cambia, las
+// coordenadas de pantalla siguen siendo válidas.
+function _snapCamKey(cam, w, h){
+  const p = cam.position, q = cam.quaternion;
+  return `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)},` +
+         `${q.x.toFixed(5)},${q.y.toFixed(5)},${q.z.toFixed(5)},${q.w.toFixed(5)},` +
+         `${cam.zoom||1},${w},${h}`;
+}
+
+function _snapRebuildProjections(cam, w, h){
+  const V = _snapCache.verts, E = _snapCache.edges;
+  const nv = V.length, ne = E.length;
+  const P = {
+    vx:new Float32Array(nv), vy:new Float32Array(nv), vok:new Uint8Array(nv),
+    ex1:new Float32Array(ne), ey1:new Float32Array(ne),
+    ex2:new Float32Array(ne), ey2:new Float32Array(ne), eok:new Uint8Array(ne)
+  };
+  const hw = w*0.5, hh = h*0.5;
+  for(let i=0;i<nv;i++){
+    const r = _projectPoint(V[i].pt, cam, _spTmp);
+    P.vok[i] = r.ok ? 1 : 0;
+    if(r.ok){ P.vx[i] = (r.x*0.5+0.5)*w; P.vy[i] = (-r.y*0.5+0.5)*h; }
+  }
+  for(let i=0;i<ne;i++){
+    const a = _projectPoint(E[i][0], cam, _spTmp);
+    const ax = a.ok ? (a.x*0.5+0.5)*w : 0, ay = a.ok ? (-a.y*0.5+0.5)*h : 0;
+    const aok = a.ok;
+    const b = _projectPoint(E[i][1], cam, _spTmp);
+    P.eok[i] = (aok && b.ok) ? 1 : 0;
+    if(P.eok[i]){
+      P.ex1[i]=ax; P.ey1[i]=ay;
+      P.ex2[i]=(b.x*0.5+0.5)*w; P.ey2[i]=(-b.y*0.5+0.5)*h;
+    }
+  }
+  _snapProj = P;
+}
+
+// Bonificación en píxeles por tipo. Un punto de este tipo "gana" a otro
+// hasta esta ventaja de distancia; más allá, manda lo que está más cerca.
+const SNAP_BONUS = { end:9, mid:5, center:4, edge:0, perp:3 };
+
+// Estado para la histéresis
+let _snapSticky = null;
+
+function detectSnap(cursorPt, px, py, w, h){
+  if(_snapCacheDirty || !_snapCache) { _snapRebuildCache(); _snapProjKey=''; }
+
+  const cam = activeCamera ? activeCamera() : camera;
+  cam.updateMatrixWorld();
+  if(cam.matrixWorldInverse) cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+
+  const key = _snapCamKey(cam, w, h);
+  if(key !== _snapProjKey || !_snapProj){
+    _snapRebuildProjections(cam, w, h);
+    _snapProjKey = key;
+  }
+
+  const snapR = _snapGetRadius();
+  const R2 = snapR * snapR;
+  const P = _snapProj, V = _snapCache.verts, E = _snapCache.edges;
+
+  let best = null, bestScore = Infinity;
+  const consider = (score, mk) => { if(score < bestScore){ bestScore = score; best = mk(); } };
+
+  // ── Vértices, puntos medios y centroides ────────────────────────────
+  for(let i=0;i<V.length;i++){
+    if(!P.vok[i]) continue;
+    const dx = P.vx[i]-px, dy = P.vy[i]-py;
+    const d2 = dx*dx + dy*dy;
+    if(d2 > R2) continue;
+    const d = Math.sqrt(d2);
+    const c = V[i];
+    const score = d - (SNAP_BONUS[c.type] || 0);
+    if(score < bestScore){ bestScore = score; best = {pt:c.pt.clone(), type:c.type, label:c.label, d}; }
+  }
+
+  // ── Aristas: prueba 2D contra el segmento proyectado ────────────────
+  let bestEdge = -1, bestEdgeT = 0, bestEdgeD = Infinity;
+  for(let i=0;i<E.length;i++){
+    if(!P.eok[i]) continue;
+    const x1=P.ex1[i], y1=P.ey1[i], x2=P.ex2[i], y2=P.ey2[i];
+    // Descarte barato por caja envolvente del segmento
+    if(px < Math.min(x1,x2)-snapR || px > Math.max(x1,x2)+snapR ||
+       py < Math.min(y1,y2)-snapR || py > Math.max(y1,y2)+snapR) continue;
+    const ex=x2-x1, ey=y2-y1;
+    const len2 = ex*ex+ey*ey;
+    if(len2 < 1e-6) continue;
+    let t = ((px-x1)*ex + (py-y1)*ey) / len2;
+    if(t < 0.04 || t > 0.96) continue;     // cerca de un extremo: manda el vértice
+    const cx = x1+ex*t, cy = y1+ey*t;
+    const d2 = (cx-px)*(cx-px) + (cy-py)*(cy-py);
+    if(d2 > R2 || d2 >= bestEdgeD) continue;
+    bestEdgeD = d2; bestEdge = i; bestEdgeT = t;
+  }
+  if(bestEdge >= 0){
+    const d = Math.sqrt(bestEdgeD);
+    const score = d - (SNAP_BONUS.edge || 0);
+    if(score < bestScore){
+      // Sólo aquí se resuelve el punto exacto en 3D, una vez.
+      const a = E[bestEdge][0], b = E[bestEdge][1];
+      const pt = a.clone().lerp(b, bestEdgeT);
+      bestScore = score;
+      best = {pt, type:'edge', label:'ARISTA', d};
+    }
+  }
+
+  // ── Puntos de la polilínea en curso ─────────────────────────────────
+  const projTmp = {x:0,y:0,ok:false};
+  const scr = (p) => {
+    const r = _projectPoint(p, cam, projTmp);
+    return r.ok ? {sx:(r.x*0.5+0.5)*w, sy:(-r.y*0.5+0.5)*h} : null;
+  };
+  polyPts.forEach((p,i)=>{
+    const q = scr(p); if(!q) return;
+    const d = Math.hypot(q.sx-px, q.sy-py);
+    if(d<=snapR){
+      const esCierre = (polyPts.length>=3 && i===0);
+      const score = d - (esCierre ? 16 : SNAP_BONUS.end);
+      if(score<bestScore){ bestScore=score;
+        best={pt:p.clone(), type:'end', label:esCierre?'CERRAR':'NODO', d}; }
+    }
+    if(i>0){
+      const m = new THREE.Vector3().addVectors(polyPts[i-1],p).multiplyScalar(0.5);
+      const qm = scr(m); if(!qm) return;
+      const dm = Math.hypot(qm.sx-px, qm.sy-py);
+      if(dm<=snapR){
+        const score = dm - SNAP_BONUS.mid;
+        if(score<bestScore){ bestScore=score; best={pt:m, type:'mid', label:'MEDIO', d:dm}; }
+      }
+    }
+  });
+
+  // ── Histéresis: no soltar el enganche por un píxel ──────────────────
+  // Si había un snap activo y sigue estando razonablemente cerca, se
+  // conserva salvo que el nuevo candidato sea claramente mejor. Sin esto
+  // el indicador salta entre dos puntos casi equidistantes con cada
+  // temblor del ratón.
+  if(_snapSticky){
+    const q = scr(_snapSticky.pt);
+    if(q){
+      const dS = Math.hypot(q.sx-px, q.sy-py);
+      if(dS <= snapR*1.35){
+        const scoreS = dS - (SNAP_BONUS[_snapSticky.type] || 0);
+        // El nuevo candidato debe ganar por más de 6 px para desbancarlo.
+        if(!best || scoreS - 6 <= bestScore){
+          _snapSticky = {pt:_snapSticky.pt.clone(), type:_snapSticky.type, label:_snapSticky.label, d:dS};
+          return _snapSticky;
+        }
+      }
+    }
+  }
+
+  _snapSticky = best ? {pt:best.pt.clone(), type:best.type, label:best.label, d:best.d} : null;
+  return best;
+}
+
+// Invalidar la proyección cacheada cuando cambie la cámara o el caché.
+function invalidateSnapProjection(){ _snapProjKey = ''; }
 
 function updateSnapIndicator(px, py, snapResult, w, h){
   const el=document.getElementById('snapIndicator');
@@ -11726,19 +11939,24 @@ function updateSnapIndicator(px, py, snapResult, w, h){
   const cw=w||document.getElementById('vc').clientWidth||800;
   const ch=h||document.getElementById('vc').clientHeight||600;
   const {sx,sy}=worldToScreen(snapResult.pt,cw,ch);
+  // v7.6: mover con transform en lugar de left/top. left/top provoca
+  // recálculo de layout en cada mousemove; transform va por composición y
+  // el indicador deja de arrastrarse un fotograma por detrás del cursor.
   el.style.display='block';
-  el.style.left=sx+'px';
-  el.style.top=sy+'px';
-  el.className='';
-  el.id='snapIndicator';
-  el.classList.add('snap-'+snapResult.type);
-  document.getElementById('snapLabel').textContent=snapResult.label;
+  el.style.left='0px';
+  el.style.top='0px';
+  el.style.transform=`translate3d(${sx}px,${sy}px,0) translate(-50%,-50%)`;
+  const cls='snapIndicator snap-'+snapResult.type;
+  if(el.className!==cls) el.className=cls;
+  const lbl=document.getElementById('snapLabel');
+  if(lbl.textContent!==snapResult.label) lbl.textContent=snapResult.label;
 }
 
 function hideSnapIndicator(){
   const el=document.getElementById('snapIndicator');
   if(el) el.style.display='none';
   _snapResult=null;
+  _snapSticky=null;   // v7.6: soltar la histéresis al ocultar
 }
 // ═══════════════════════════════════════
 // HERRAMIENTA REGLA (MEDICIÓN) — con snap
@@ -21894,6 +22112,7 @@ function guardarProyectoAs(evt){
       version:'biosim-v17',
       ts: Date.now(),
       _latitude, _longitude, northAngle, _simDOY, _simHour,
+      modelOrigin: modelOrigin,   // v7.6: referencia de alineación de importaciones
       zones: zones.map(z=>({
         id:z.id, name:z.name, color:z.color, volume:z.volume,
         thermal:z.thermal||false, shader:z.shader!==false, _open:z._open,
@@ -22124,6 +22343,8 @@ function _cargarProyectoData(proj){
     const spLon=document.getElementById('spLon');
     if(spLon) spLon.value=_longitude.toFixed(2);
   }
+  // v7.6: referencia de alineación para importaciones posteriores
+  modelOrigin = proj.modelOrigin || null;
   if(proj.northAngle!==undefined){
     northAngle=proj.northAngle;
     const spN=document.getElementById('spNorth');
