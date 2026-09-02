@@ -17152,6 +17152,24 @@ function _getBufLag(buf, currentIdx, lagH){
   return buf[idx];
 }
 
+// ── v7.7 · Acoplamiento por admitancia (CIBSE Guide A 2015 §5.4) ───────
+//   Q_adm = Y·A·(Ti_media_24h − Ti)
+// Representa el intercambio entre el aire de la zona y la masa térmica de
+// la superficie a lo largo del ciclo diario: cuando Ti supera su media, la
+// masa absorbe y recorta el pico; cuando cae por debajo, devuelve y suaviza
+// el valle. Se aplica a TODA superficie con masa, sea interior, adiabática
+// o partición compartida.
+function _addAdmittance(s, p, zi, H, Q, bufIdx){
+  const YA = p.Y * s.area;
+  if(!isFinite(YA) || YA <= 0) return;
+  const ti_buf = _tiMeanBuf[s.zoneId];
+  if(!ti_buf) return;            // sin histórico todavía: no aportar nada
+  const Ti_mean = _getBufMean(ti_buf, bufIdx);
+  if(!isFinite(Ti_mean)) return;
+  H[zi][zi] -= YA;
+  Q[zi]     += YA * Ti_mean;
+}
+
 function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rhoA,CpA,eBalance,hIdx,shadowFactors,surfGeomCache,sharedSurfCache,accumWeight){
   // v3.3: accumWeight escala las acumulaciones de eBalance hechas DENTRO de esta
   // función (gainGlazSol, gainPeople/Light/Equip) — necesario cuando el solver
@@ -17177,9 +17195,24 @@ function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rh
 
     if(s.exterior){
       const sg = surfGeomCache ? surfGeomCache.get(s.id) : null;
-      // Skip adiabatic surfaces entirely — no conduction, solar or admittance contribution
-      if(sg && sg.isAdiabatic) return;
-      if(!sg && (s.tag||autoTag(s))==='adiabática') return;
+      // ── v7.7 · SUPERFICIES ADIABÁTICAS ────────────────────────────────
+      // Adiabático NO significa "esta superficie no existe". Significa que
+      // no hay flujo NETO a través de ella, porque al otro lado hay un
+      // espacio en las mismas condiciones. La superficie sigue teniendo
+      // masa, y sigue absorbiendo calor del aire de día y devolviéndolo de
+      // noche. Ese intercambio es la admitancia Y, y no depende de lo que
+      // haya al otro lado (CIBSE Guide A 2015 §5.4).
+      //
+      // Hasta v7.6 se descartaban por completo, incluida su admitancia. En
+      // un aula con el techo y tres muros marcados adiabáticos eso suponía
+      // simular el espacio con la MITAD de su inercia: sin masa que
+      // absorbiera el pico solar, la temperatura interior oscilaba el doble
+      // que el aire exterior y alcanzaba máximas típicas absurdas.
+      //
+      // Ahora: sin conducción y sin ganancia solar (correcto), pero con su
+      // admitancia contabilizada (correcto también).
+      const _esAdiab = sg ? sg.isAdiabatic : ((s.tag||autoTag(s))==='adiabática');
+      if(_esAdiab){ _addAdmittance(s, p, zi, H, Q, bufIdx); return; }
       const isGlaz     = sg ? sg.isGlaz     : /ventana|window|vidrio|glass|cristal|glazing|acristal|claraboya|skylight|lucernario|tragaluz/.test(s.name.toLowerCase());
       const isFloor    = sg ? sg.isFloor    : /piso|floor|suelo|ground/.test(s.name.toLowerCase());
       // v2.9: piso elevado (groundContact:false) NO se acopla al terreno.
@@ -17351,19 +17384,10 @@ function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rh
       // When Ti > Ti_mean: mass absorbs heat (damping peak)
       // When Ti < Ti_mean: mass releases heat (damping trough)
       //
-      // v4.3: si la superficie está marcada como adiabática, también la
-      // omitimos del cálculo de admitancia. La intención del usuario al
-      // marcar adiabática es "anular" la superficie del balance térmico,
-      // así que no debe aportar inercia tampoco.
-      if((s.tag||autoTag(s))==='adiabática') return;
-      const YA = p.Y * s.area;
-      if(!isFinite(YA) || YA<=0) return;
-      // Compute Ti mean from buffer
-      const ti_buf = _tiMeanBuf[s.zoneId];
-      const Ti_mean = ti_buf ? _getBufMean(ti_buf, bufIdx) : Ti;
-      // Add admittance term to Q (explicit — Y·A·Ti_mean as source, Y·A as conductance)
-      H[zi][zi] -= YA;
-      Q[zi]     += YA * Ti_mean;
+      // v7.7: la exclusión de las adiabáticas que había aquí se ha
+      // eliminado por la misma razón que en la rama exterior — una
+      // superficie adiabática aporta inercia como cualquier otra.
+      _addAdmittance(s, p, zi, H, Q, bufIdx);
     }
   });
 
