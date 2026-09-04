@@ -16791,6 +16791,10 @@ function _gndPatches(){
   return _gndPatchCache;
 }
 
+// v8.0: complejidad de obstrucción por superficie, calculada una vez al
+// construir el caché de sombras y reutilizada por el factor de vista al cielo.
+let _obstrComplexity = null;
+
 let _svfCache = null;        // Map<surfId, {sky, gnd, skyOpen, gndOpen}>
 let _svfCacheDirty = true;
 
@@ -16831,7 +16835,7 @@ async function buildSkyViewFactors(surfList, onProgress){
   const bvh = _buildShadowBVH(casterSurfs);
 
   const sky = _skyPatches(), gnd = _gndPatches();
-  let rays = 0, done = 0;
+  let rays = 0, done = 0, sensoresTotal = 0, refinadas = 0;
 
   for(const s of surfList){
     const cn = surfaceCentroidNormal(s);
@@ -16839,8 +16843,17 @@ async function buildSkyViewFactors(surfList, onProgress){
     const normal = cn.normal.clone().normalize();
     const cosB   = Math.max(-1, Math.min(1, normal.y));
 
-    // Mismos sensores que el caché de sombras, desplazados sobre la normal
-    const nPts   = (s.area >= 60) ? 5 : (s.area >= 10 ? 3 : 1);
+    // v8.0: sensores por área CORREGIDOS por la disparidad entre puntos.
+    // Detrás de una celosía el cielo visible varía mucho de un punto a otro
+    // de la misma ventana; con 3 sensores el resultado era ruidoso y podía
+    // dar valores no monótonos entre superficies vecinas.
+    const base = (s.area >= 60) ? 5 : (s.area >= 10 ? 3 : 1);
+    let c = _obstrComplexity ? _obstrComplexity.get(s.id) : undefined;
+    if(c === undefined) c = _obstructionComplexity(s, {normal, centroid:cn.centroid}, bvh);
+    const factor = Math.max(1, Math.min(6, 1 + 9*c*c));
+    const nPts   = Math.min(24, Math.max(1, Math.round(base * factor)));
+    sensoresTotal += nPts;
+    if(nPts > base) refinadas++;
     const origins = _shadowSamplePoints(s, cn, nPts).map(pt => pt.addScaledVector(normal, 0.08));
 
     const rSky = _integrateHemisphere(sky, origins, normal, s.id, bvh);
@@ -16875,7 +16888,8 @@ async function buildSkyViewFactors(surfList, onProgress){
   }
   log(`Factor de vista al cielo: ${surfList.length} superficies · ${(rays/1000).toFixed(0)}k rayos · ` +
       `${obstruidas} con el cielo parcialmente tapado · ` +
-      `SVF medio ${(cuenta ? sumaRel/cuenta*100 : 100).toFixed(0)}% del hemisferio despejado.`, 'ok');
+      `SVF medio ${(cuenta ? sumaRel/cuenta*100 : 100).toFixed(0)}% del hemisferio despejado · ` +
+      `${sensoresTotal} sensores (${refinadas} superficie(s) refinada(s) por obstrucción irregular).`, 'ok');
 
   // v7.3 — Diagnóstico. Una superficie EXTERIOR que no ve nada de cielo casi
   // siempre delata un problema del modelo, no una obstrucción real: normal
@@ -16936,6 +16950,55 @@ function _bvhTransmittance(bvh, origin, dir, near, far, excludeSid){
     }
   }
   return tau;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  COMPLEJIDAD DE OBSTRUCCIÓN (v8.0)
+//
+//  Hasta v7.9 los sensores se repartían SOLO por área. Una cubierta de 66 m²
+//  despejada recibía 9 sensores, que dan todos el mismo resultado, y una
+//  ventana de 11 m² detrás de una celosía de 157 piezas recibía 3, que es
+//  muy poco para describir un cielo tan fragmentado.
+//
+//  Síntoma observado en CALIPSO_AULA: la ventana salía con MÁS cielo visible
+//  (0,202) que el muro contiguo y más sombreado (0,248), siendo dos
+//  superficies casi coplanares separadas 6 cm. Resultados no monótonos entre
+//  vecinas son la firma del submuestreo.
+//
+//  Esta sonda mide, con muy pocos rayos, cuánto DIFIEREN entre sí los puntos
+//  de una misma superficie. Si todos ven lo mismo, un sensor basta. Si
+//  difieren mucho, la superficie está tras una obstrucción irregular y
+//  necesita más. El coste es despreciable (~9×8 rayos por superficie) y
+//  permite repartir el mismo presupuesto donde de verdad hace falta.
+// ═══════════════════════════════════════════════════════════════════════
+const _PROBE_DIRS = (() => {
+  // 8 direcciones repartidas por el hemisferio: 4 bajas, 3 medias, 1 cenital
+  const d = [];
+  [[20,0],[20,90],[20,180],[20,270],[50,45],[50,165],[50,285],[85,0]]
+    .forEach(([altD, azD]) => {
+      const a = altD*Math.PI/180, z = azD*Math.PI/180;
+      d.push(new THREE.Vector3(Math.sin(z)*Math.cos(a), Math.sin(a), -Math.cos(z)*Math.cos(a)).normalize());
+    });
+  return d;
+})();
+
+// Devuelve 0 (todos los puntos ven lo mismo) … 1 (máxima disparidad).
+function _obstructionComplexity(s, gd, bvh){
+  if(!bvh || !gd) return 0;
+  const nrm = gd.normal;
+  const pts = _shadowSamplePoints(s, gd, 9).map(p => p.addScaledVector(nrm, 0.08));
+  if(pts.length < 2) return 0;
+  const abierto = pts.map(o => {
+    let vis = 0, tot = 0;
+    for(const dir of _PROBE_DIRS){
+      if(nrm.dot(dir) <= 0) continue;
+      tot++;
+      vis += _bvhTransmittance(bvh, o, dir, 0.05, 500, s.id);
+    }
+    return tot ? vis/tot : 1;
+  });
+  const mx = Math.max(...abierto), mn = Math.min(...abierto);
+  return Math.max(0, Math.min(1, mx - mn));
 }
 
 // ── v7.0: Muestreo estratificado de puntos sobre una superficie ─────────
@@ -17034,13 +17097,28 @@ async function buildShadowCache(onProgress){
   // pequeñas conservan el rayo único. Presupuesto global ≈4 sensores/
   // superficie en promedio para acotar el tiempo total de cálculo.
   const RAW_PTS = A => A >= 60 ? 9 : A >= 25 ? 7 : A >= 10 ? 5 : A >= 3 ? 3 : 1;
-  let rawTotal = 0;
-  const rawPts = new Map();
+  // v8.0: el peso por área se corrige por la disparidad entre puntos de la
+  // misma superficie. Una superficie uniforme (despejada o totalmente tapada)
+  // baja a la mitad de sensores; una tras celosía sube hasta ×4. El
+  // presupuesto global no cambia: los sensores se mueven de donde sobran a
+  // donde faltan.
+  let rawTotal = 0, complejas = 0;
+  const rawPts = new Map(), cplx = new Map();
   extSurfs.forEach(s => {
-    const n = geomData.has(s.id) ? RAW_PTS(s.area || 0) : 0;
+    if(!geomData.has(s.id)){ rawPts.set(s.id, 0); return; }
+    const c = _obstructionComplexity(s, geomData.get(s.id), _shadowBVH);
+    cplx.set(s.id, c);
+    if(c > 0.15) complejas++;
+    // c=0 → ×0.5 · c=0.25 → ×1.0 · c=0.5 → ×2.0 · c≥0.75 → ×4
+    const factor = Math.max(0.5, Math.min(4, 0.5 + 6*c*c));
+    const n = Math.max(1, Math.round(RAW_PTS(s.area || 0) * factor));
     rawPts.set(s.id, n);
     rawTotal += n;
   });
+  _obstrComplexity = cplx;   // reutilizado por el factor de vista al cielo
+  if(complejas > 0){
+    log(`Muestreo adaptativo: ${complejas} superficie(s) con obstrucción irregular reciben sensores adicionales.`, 'ok');
+  }
   const budget  = Math.max(extSurfs.length * 4, 40);
   const scale   = rawTotal > budget ? budget / rawTotal : 1;
   const sampleMap = new Map();
@@ -24975,9 +25053,12 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Cielo difuso isótropo</strong> (Liu–Jordan). No incorpora
           las componentes circunsolar ni de brillo de horizonte del modelo de Perez, de modo que con cielo
           despejado subestima la fachada orientada al sol, típicamente entre un 5 % y un 20 %.</li>
-        <li style="margin-bottom:7px"><strong style="color:var(--text)">El sombreamiento solo afecta a la radiación directa.</strong>
-          Las componentes difusa y reflejada usan factores de vista analíticos que suponen el hemisferio
-          despejado, así que una superficie muy obstruida recibe más difusa de la real.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Factor de vista al cielo por obstrucción.</strong>
+          La difusa y la reflejada ya no suponen el hemisferio despejado: se mide con 145 parches de
+          Tregenza cuánto cielo ve realmente cada superficie, con muestreo adaptativo que asigna más
+          sensores donde la obstrucción es irregular (celosías, vegetación). Las zonas de sombra pueden
+          declararse translúcidas con un coeficiente τ. Lo que sigue sin modelarse es la
+          <b>interreflexión</b>: los obstáculos bloquean pero no devuelven radiación.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Sin interreflexión entre superficies.</strong> Igual que
           Ecotect, los obstáculos bloquean pero no devuelven radiación. La reflejada procede únicamente
           del plano de terreno mediante una albedo global.</li>
