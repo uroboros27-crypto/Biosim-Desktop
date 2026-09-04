@@ -4598,13 +4598,19 @@ canvas#cv{display:block;}
         <!-- v3.2: texto explicativo ampliado al doble para mejor legibilidad,
              y describe los tres niveles de pintura disponibles. -->
         <div style="padding:6px 8px;margin:2px 8px;font-size:.74rem;color:var(--text2);line-height:1.6;background:rgba(80,140,200,0.06);border-left:3px solid var(--accent);border-radius:4px">
-          Tipo activo: <b id="zdSchedTypeLbl" style="color:var(--accent)">Ocupación</b><br>
-          <b>Modos de pintura:</b><br>
-          • <b>Clic</b> → 100% (operación plena)<br>
-          • <b>Shift + clic</b> → 50% (ocupación parcial)<br>
-          • <b>Alt + clic</b> (o <b>AltGr + clic</b>) → 15% (presencia mínima, p. ej. mantenimiento, fines de semana de bajo uso)<br>
-          • Arrastra para pintar varias celdas con el mismo valor.<br>
+          Tipo activo: <b id="zdSchedTypeLbl" style="color:var(--accent)">Ocupación</b> ·
+          pincel <b id="zdBrushLbl" style="color:var(--accent)">100%</b><br>
+          • <b>Clic</b> → aplica el porcentaje del pincel. Vuelve a hacer clic sobre una celda que ya lo tiene para apagarla.<br>
+          • <b>Arrastra</b> para pintar varias celdas seguidas.<br>
+          • <b>Shift + clic</b> → 50% · <b>Alt + clic</b> → 15%, independientemente del pincel.<br>
           <span style="color:rgba(80,200,120,0.95);font-size:.65rem">✓ Vinculado a la simulación</span>
+        </div>
+
+        <!-- v7.8: paleta de intensidad del pincel. El valor elegido es el que
+             se aplica al hacer clic, sin necesidad de modificadores. -->
+        <div style="padding:0 8px 5px">
+          <div style="font-size:.6rem;color:var(--text3);margin-bottom:3px">Intensidad del pincel</div>
+          <div id="zdBrushPalette" style="display:grid;grid-template-columns:repeat(10,1fr);gap:2px"></div>
         </div>
         <div style="padding:0 8px">
           <canvas id="zdSchedCanvas"
@@ -16382,7 +16388,31 @@ function crearEdificioDemo(){
 // ═══════════════════════════════════════
 // EPW
 // ═══════════════════════════════════════
+// v7.9 — Metadatos del clima cargado. Se guardan en el .bio junto con las
+// series, de modo que al reabrir el proyecto el clima vuelve solo.
+let epwMeta = null;   // {name, city, lat, lon, gt}
+
+// Refresca los tres indicadores de clima de la interfaz.
+function _epwRefreshUI(){
+  const ok = epwT.length >= 8760;
+  const stat = document.getElementById('epwStat');
+  const sinfo = document.getElementById('simEpwInfo');
+  const v = document.getElementById('vEPW');
+  if(!ok){
+    if(stat) stat.textContent = 'Sin EPW';
+    if(sinfo) sinfo.innerHTML = '<b style="color:var(--warn)">⚠ Sin clima cargado</b><br>Carga un archivo EPW antes de simular';
+    if(v){ v.textContent='EPW —'; v.style.color='var(--warn)'; }
+    return;
+  }
+  const nm = epwMeta && (epwMeta.city || epwMeta.name) ? ` · ${epwMeta.city || epwMeta.name}` : '';
+  if(stat) stat.textContent = `8760h·T∈[${safeMin(epwT).toFixed(1)},${safeMax(epwT).toFixed(1)}]°C`;
+  if(sinfo) sinfo.innerHTML =
+    `<b style="color:var(--accent2)">✓ EPW cargado</b>${nm}<br>8760 h · T∈[${safeMin(epwT).toFixed(1)}, ${safeMax(epwT).toFixed(1)}]°C`;
+  if(v){ v.textContent='EPW ✓'; v.style.color='var(--accent2)'; }
+}
+
 document.getElementById('fEPW').addEventListener('change',e=>{
+  const _f = e.target.files[0];
   const reader=new FileReader();
   reader.onload=ev=>{
     const lines=ev.target.result.split('\n');
@@ -16425,17 +16455,21 @@ document.getElementById('fEPW').addEventListener('change',e=>{
       if(c.length>21){epwT.push(+c[6]||0);epwDN.push(+c[14]||0);epwDH.push(+c[15]||0);epwWS.push(+c[21]||0);}else if(c.length>15){epwT.push(+c[6]||0);epwDN.push(+c[14]||0);epwDH.push(+c[15]||0);epwWS.push(0);}
     }
     if(epwT.length>=8760){
-      document.getElementById('epwStat').textContent=`8760h·T∈[${safeMin(epwT).toFixed(1)},${safeMax(epwT).toFixed(1)}]°C`;
-      const sinfo=document.getElementById('simEpwInfo');
-      if(sinfo) sinfo.innerHTML=`<b style="color:var(--accent2)">✓ EPW cargado</b><br>8760 h · T∈[${safeMin(epwT).toFixed(1)}, ${safeMax(epwT).toFixed(1)}]°C`;
-      document.getElementById('vEPW').textContent='EPW ✓';
-      document.getElementById('vEPW').style.color='var(--accent2)';
+      // v7.9: registrar la procedencia para poder guardarla en el proyecto
+      const _loc = (lines[0]||'').split(',');
+      epwMeta = {
+        name: (_f && _f.name) || 'EPW',
+        city: (_loc[1]||'').trim(),
+        lat: _latitude, lon: _longitude
+      };
+      _epwRefreshUI();
       // ── Auto-set ground temperature from EPW annual mean (ISO 13370 §9.3) ──
       // GT ≈ T_annual_mean of outdoor air. This is the most physically correct
       // boundary condition for ground-coupled floors in steady-state.
       const epwMeanAnn = epwT.filter(v=>isFinite(v)).reduce((a,b)=>a+b,0) / epwT.filter(v=>isFinite(v)).length;
       const gtRounded = Math.round(epwMeanAnn * 2) / 2; // round to 0.5°C
       setGT(gtRounded);
+      if(epwMeta) epwMeta.gt = gtRounded;
       log(`EPW: T_min=${safeMin(epwT).toFixed(1)}°C T_max=${safeMax(epwT).toFixed(1)}°C  Lat=${_latitude.toFixed(2)}° Lon=${_longitude.toFixed(2)} · GT→${gtRounded.toFixed(1)}°C (media anual EPW)`,'ok');
     } else { log('EPW inválido.','err'); epwT=[]; }
   };
@@ -20873,13 +20907,25 @@ function openZoneDetail(zid){
   // v3.2: ocupación se ingresa como número entero de personas.
   // Conservamos occDensity internamente porque es lo que usan los cálculos.
   const flA = _zoneFloorArea(z.id);
-  const occCount = Math.round((L.occDensity || 0) * flA);
+  // v7.9: leer el conteo GUARDADO. Antes se reconstruía desde la densidad
+  // (occDensity × área de piso), de modo que si la densidad había quedado
+  // en 0 — por ejemplo por no haber área de suelo al teclear el dato — el
+  // panel mostraba 0 ocupantes aunque el archivo tuviera el número correcto
+  // y el motor lo estuviera usando. El dato nunca se perdió: no se leía.
+  const occCount = (L.occCount > 0)
+    ? L.occCount
+    : Math.round((L.occDensity || 0) * flA);
   const occInp = document.getElementById('zdOccCount');
   if(occInp) occInp.value = occCount;
+  // Reparación en caliente: si hay conteo pero no densidad y ahora sí hay
+  // área de suelo, se recalcula para que los cálculos por m² sean correctos.
+  if(L.occCount > 0 && !(L.occDensity > 0) && flA > 0){
+    L.occDensity = L.occCount / flA;
+  }
   const densView = document.getElementById('zdOccDensView');
   if(densView) densView.textContent = flA > 0
     ? `${(L.occDensity||0).toFixed(3)} p/m²  (sobre ${flA.toFixed(1)} m²)`
-    : '— (no hay piso definido)';
+    : '— (sin superficies 🪨 Piso ni 🧱 Losa en la zona)';
   document.getElementById('zdOccMet').value = L.occMet;
   if(document.getElementById('zdLight')) document.getElementById('zdLight').value = L.lightLoad;
   if(document.getElementById('zdLightType')) document.getElementById('zdLightType').value = L.lightType||'fluor';
@@ -20901,6 +20947,7 @@ function openZoneDetail(zid){
   // Schedules (solo tienen sentido en zonas térmicas)
   if(z.thermal){
     zdSchedType('occ', document.getElementById('zdst_occ'));
+    zdSetBrush(Math.round(_zdBrush*100));   // v7.8: pintar la paleta
     setTimeout(()=>zdDrawSched(), 40);
   }
 }
@@ -21031,9 +21078,21 @@ function zdSaveLClamped(field, val, maxVal, etiqueta){
 
 // v3.2: Área del piso de la zona — suma todas las superficies con tag 'piso'.
 // Necesaria para convertir "número de ocupantes" → "densidad p/m²" interna.
+// v7.9: 'piso' y 'losa' son la misma cosa a efectos de superficie de suelo.
+// La distinción es de nomenclatura (losa = entrepiso, piso = solera), no
+// física: ambas son la superficie horizontal inferior sobre la que se
+// reparten ocupación, iluminación y equipos.
+//
+// Antes solo contaba 'piso'. En un modelo cuyos suelos quedaron etiquetados
+// como 'losa' el área salía CERO, con tres consecuencias encadenadas:
+//   · la ocupación tecleada no se podía convertir a densidad,
+//   · el panel mostraba 0 ocupantes al reabrir el proyecto,
+//   · iluminación y equipos (W/m² × área de piso) valían cero en la
+//     simulación aunque el panel mostrara sus vatios.
+const _TAGS_PISO = ['piso', 'losa'];
 function _zoneFloorArea(zid){
   return surfaces
-    .filter(s => s.zoneId === zid && (s.tag||autoTag(s)) === 'piso')
+    .filter(s => s.zoneId === zid && _TAGS_PISO.includes(s.tag || autoTag(s)))
     .reduce((a,s) => a + s.area, 0);
 }
 
@@ -21046,7 +21105,9 @@ function zdSaveOccupants(n){
   const occCount = Math.max(0, Math.floor(n || 0));
   const flA = _zoneFloorArea(z.id);
   if(flA <= 0){
-    log(`⚠ Zona "${z.name}" sin piso definido: no se puede convertir ${occCount} ocupantes a densidad. Asigna al menos una superficie como piso.`,'warn');
+    log(`⚠ Zona "${z.name}" sin suelo definido: se guardan los ${occCount} ocupantes, pero no se puede derivar la densidad p/m². ` +
+        `Marca alguna superficie horizontal inferior como 🪨 Piso o 🧱 Losa. ` +
+        `Mientras tanto, iluminación y equipos (W/m²) no aportarán carga porque el área de suelo es cero.`,'warn');
     // Guardamos el conteo pero dejamos densidad en 0 para no falsear cálculos
     z._loads.occCount = occCount;
     z._loads.occDensity = 0;
@@ -21058,7 +21119,7 @@ function zdSaveOccupants(n){
   const densView = document.getElementById('zdOccDensView');
   if(densView) densView.textContent = flA > 0
     ? `${z._loads.occDensity.toFixed(3)} p/m²  (sobre ${flA.toFixed(1)} m²)`
-    : '— (no hay piso definido)';
+    : '— (sin superficies 🪨 Piso ni 🧱 Losa en la zona)';
 }
 
 // ─── v4.0: gestión de contraventanas ──────────────────────────────────
@@ -21399,13 +21460,10 @@ function zdDrawSched(){
     const hh=Math.floor((px-LEFT)/hW), dd=Math.floor((py-TOP)/dH);
     if(hh>=0&&hh<24&&dd>=0&&dd<7){
       const k=dd*24+hh;
-      if(ev.altKey){
-        arr[k] = Math.abs(arr[k]-0.15)<_EPS ? 0 : 0.15;
-      } else if(ev.shiftKey){
-        arr[k] = Math.abs(arr[k]-0.5)<_EPS ? 0 : 0.5;
-      } else {
-        arr[k] = Math.abs(arr[k]-1.0)<_EPS ? 0 : 1;
-      }
+      // v7.8: el valor lo decide el pincel activo. Shift y Alt siguen
+      // funcionando como atajos rápidos sin cambiar el pincel.
+      const v = ev.altKey ? 0.15 : ev.shiftKey ? 0.5 : _zdBrush;
+      arr[k] = Math.abs(arr[k]-v)<_EPS ? 0 : v;
       cv._toggleTo = arr[k];
       zdDrawSched();
     }
@@ -21418,7 +21476,7 @@ function zdDrawSched(){
     if(hh>=0&&hh<24&&dd>=0&&dd<7){
       const target = ev.altKey ? 0.15
                    : ev.shiftKey ? 0.5
-                   : (cv._toggleTo !== undefined ? cv._toggleTo : 1);
+                   : (cv._toggleTo !== undefined ? cv._toggleTo : _zdBrush);
       arr[dd*24+hh] = target;
       zdDrawSched();
     }
@@ -21429,6 +21487,54 @@ function zdDrawSched(){
 function zdSchedFill(v){
   const arr=zdGetSched(); if(!arr) return;
   arr.fill(v); zdDrawSched();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  PINCEL DE INTENSIDAD DEL EDITOR DE HORARIOS (v7.8)
+//
+//  Antes solo había tres valores pintables — 100%, 50% con Shift y 15% con
+//  Alt — y había que recordar los modificadores. Ahora hay diez botones de
+//  10% a 100%: el que esté activo es el valor que se aplica al hacer clic.
+//
+//  El valor NO es decorativo. La fracción de cada celda multiplica
+//  directamente la magnitud del apartado correspondiente en el balance
+//  térmico horario:
+//    · ocupación   → nº de personas y su calor sensible/latente
+//    · iluminación → W/m² instalados
+//    · equipos     → W/m² instalados, con su fracción latente
+//    · ventilación → caudal (ACH, l/s·persona o l/s·m²)
+//    · infiltración→ ACH base, corregida por viento
+//    · contraventanas → resistencia adicional aplicada al hueco
+//  Un 50% en ocupación son media ocupación y medio caudal si la ventilación
+//  se calcula por persona, no "medio encendido".
+// ═══════════════════════════════════════════════════════════════════════
+let _zdBrush = 1.0;   // fracción activa del pincel, 0.1–1.0
+
+function zdSetBrush(pct){
+  _zdBrush = Math.max(0.1, Math.min(1, (+pct || 100) / 100));
+  zdRenderBrushPalette();
+  const lbl = document.getElementById('zdBrushLbl');
+  if(lbl) lbl.textContent = Math.round(_zdBrush*100) + '%';
+}
+
+function zdRenderBrushPalette(){
+  const cont = document.getElementById('zdBrushPalette');
+  if(!cont) return;
+  const activo = Math.round(_zdBrush*100);
+  let h = '';
+  for(let p=10; p<=100; p+=10){
+    const on = p === activo;
+    // El botón se tiñe con la misma escala de opacidad que usa la rejilla,
+    // para que el usuario asocie botón y color de celda sin leer el número.
+    h += `<button onclick="zdSetBrush(${p})" title="Pintar al ${p}%"
+      style="padding:3px 0;font-size:.55rem;font-weight:${on?700:500};cursor:pointer;
+        border-radius:3px;line-height:1.2;
+        border:1px solid ${on?'var(--accent)':'var(--border)'};
+        background:${on?'var(--accent)':`rgba(80,140,200,${(p/100*0.55).toFixed(2)})`};
+        color:${on?'#fff':'var(--text2)'};
+        box-shadow:${on?'0 0 0 1px var(--accent)':'none'}">${p}</button>`;
+  }
+  cont.innerHTML = h;
 }
 // ═══════════════════════════════════════════════════════════════════════
 //  COPIA DE HORARIOS ENTRE ESQUEMAS (v7.4)
@@ -22137,6 +22243,21 @@ function guardarProyectoAs(evt){
       ts: Date.now(),
       _latitude, _longitude, northAngle, _simDOY, _simHour,
       modelOrigin: modelOrigin,   // v7.6: referencia de alineación de importaciones
+      // ── v7.9: CLIMA EMBEBIDO ──────────────────────────────────────────
+      // El .bio guarda las cuatro series horarias del EPW, no una ruta. Un
+      // navegador no puede releer una ruta del disco por su cuenta, y una
+      // ruta absoluta se rompe al mover el archivo o abrirlo en otro equipo.
+      // En Float32 comprimido en base64 son ~187 kB para las 8760×4 series,
+      // frente a los ~1,6 MB del EPW original: el proyecto queda
+      // autocontenido y el clima vuelve solo al abrirlo.
+      epw: (epwT.length >= 8760) ? {
+        meta: epwMeta || {name:'EPW', city:'', lat:_latitude, lon:_longitude},
+        gt:   +(document.getElementById('iGT')?.value) || null,
+        T:  u8ToB64(new Uint8Array(Float32Array.from(epwT).buffer)),
+        DN: u8ToB64(new Uint8Array(Float32Array.from(epwDN).buffer)),
+        DH: u8ToB64(new Uint8Array(Float32Array.from(epwDH).buffer)),
+        WS: u8ToB64(new Uint8Array(Float32Array.from(epwWS).buffer))
+      } : null,
       zones: zones.map(z=>({
         id:z.id, name:z.name, color:z.color, volume:z.volume,
         thermal:z.thermal||false, shader:z.shader!==false, _open:z._open,
@@ -22369,6 +22490,39 @@ function _cargarProyectoData(proj){
   }
   // v7.6: referencia de alineación para importaciones posteriores
   modelOrigin = proj.modelOrigin || null;
+
+  // ── v7.9: restaurar el clima guardado en el proyecto ────────────────
+  if(proj.epw && proj.epw.T){
+    try{
+      const dec = (b64) => {
+        const bin = atob(b64);
+        const u = new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) u[i] = bin.charCodeAt(i);
+        return Array.from(new Float32Array(u.buffer));
+      };
+      epwT  = dec(proj.epw.T);
+      epwDN = dec(proj.epw.DN);
+      epwDH = dec(proj.epw.DH);
+      epwWS = dec(proj.epw.WS);
+      epwMeta = proj.epw.meta || null;
+      if(epwMeta){
+        if(isFinite(epwMeta.lat)) _latitude  = epwMeta.lat;
+        if(isFinite(epwMeta.lon)) _longitude = epwMeta.lon;
+      }
+      if(proj.epw.gt != null && typeof setGT === 'function') setGT(proj.epw.gt);
+      _epwRefreshUI();
+      log(`Clima restaurado del proyecto: ${(epwMeta && (epwMeta.city || epwMeta.name)) || 'EPW'} · ` +
+          `8760 h · T∈[${safeMin(epwT).toFixed(1)}, ${safeMax(epwT).toFixed(1)}]°C. ` +
+          `No hace falta volver a cargar el archivo EPW.`, 'ok');
+    }catch(err){
+      epwT=[]; epwDN=[]; epwDH=[]; epwWS=[]; epwMeta=null;
+      _epwRefreshUI();
+      log('El clima guardado en el proyecto no se pudo leer. Carga el EPW manualmente.','err');
+    }
+  } else if(epwT.length < 8760){
+    _epwRefreshUI();
+    log('Este proyecto no lleva clima incorporado. Carga un archivo EPW antes de simular.','warn');
+  }
   if(proj.northAngle!==undefined){
     northAngle=proj.northAngle;
     const spN=document.getElementById('spNorth');
