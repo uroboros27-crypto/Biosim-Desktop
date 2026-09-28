@@ -1,6 +1,6 @@
 {
   "name": "biosim",
-  "version": "7.2.1",
+  "version": "8.0.0",
   "description": "BioSim — Simulador bioclimatico autocontenido (escritorio)",
   "author": "Universidad de San Buenaventura - Pasto",
   "license": "UNLICENSED",
@@ -20,15 +20,17 @@
     "productName": "BioSim",
     "copyright": "Universidad de San Buenaventura - Pasto",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "src/**/*",
-      "BioSim*.html",
+      "BioSim.html",
       "package.json"
     ],
     "compression": "maximum",
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "portable",
@@ -52,7 +54,12 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "artifactName": "BioSim-${version}-setup.exe",
-      "shortcutName": "BioSim"
+      "shortcutName": "BioSim",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }
