@@ -38,18 +38,37 @@ jobs:
 
       # Comprobacion previa: si el HTML no esta en el repo, el .exe saldria
       # vacio o con una version vieja. Mejor fallar aqui, con un mensaje claro.
-      - name: Verificar que el HTML de la aplicacion existe
+      - name: Verificar recursos de la aplicacion
         shell: pwsh
         run: |
-          $html = @(Get-ChildItem -Path . -Filter 'BioSim*.html' -File)
-          if ($html.Count -eq 0) {
-            Write-Error 'No hay ningun archivo BioSim*.html en la raiz del repositorio.'
+          if (-not (Test-Path 'BioSim.html')) {
+            Write-Error 'Falta BioSim.html en la raiz del repositorio.'
             exit 1
           }
-          Write-Host 'HTML encontrado:'
-          $html | ForEach-Object { Write-Host ("  {0}  ({1:N0} bytes)" -f $_.Name, $_.Length) }
-          if ($html.Count -gt 1) {
-            Write-Warning 'Hay mas de un BioSim*.html. main.js cargara el de nombre mas alto; borra los antiguos.'
+          $html = Get-Item 'BioSim.html'
+          Write-Host ("HTML: {0} ({1:N0} bytes)" -f $html.Name, $html.Length)
+
+          # v8.0: el HTML debe ser 100% autocontenido. Cualquier src/href que no
+          # sea data: rompe el funcionamiento sin conexion.
+          $txt = Get-Content 'BioSim.html' -Raw
+          $ext = [regex]::Matches($txt, '(?:src|href)\s*=\s*["''](?!data:|#|\$\{)[^"'']+["'']')
+          if ($ext.Count -gt 0) {
+            Write-Host 'Referencias externas encontradas:'
+            $ext | ForEach-Object { Write-Host ("  " + $_.Value) }
+            Write-Error 'BioSim.html referencia recursos externos: dejaria de funcionar sin conexion.'
+            exit 1
+          }
+          Write-Host 'HTML autocontenido: sin recursos externos.'
+
+          if (-not (Test-Path 'build/icon.ico')) {
+            Write-Error 'Falta build/icon.ico (icono de la aplicacion).'
+            exit 1
+          }
+          Write-Host ("Icono: {0:N0} bytes" -f (Get-Item 'build/icon.ico').Length)
+
+          $viejos = @(Get-ChildItem -Path . -Filter 'BioSim_v*.html' -File)
+          if ($viejos.Count -gt 0) {
+            Write-Warning ('Hay versiones antiguas del HTML en el repositorio: ' + ($viejos.Name -join ', ') + '. No se empaquetan, pero conviene borrarlas.')
           }
 
       - name: Install dependencies
