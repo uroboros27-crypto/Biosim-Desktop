@@ -17,9 +17,26 @@
 // ════════════════════════════════════════════════════════════════════
 'use strict';
 
-const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, dialog, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+
+// v8.0 — Icono de la ventana. electron-builder incrusta build/icon.ico en el
+// .exe y lo usa en el instalador, pero la VENTANA usa este otro: sin él,
+// Windows muestra el icono por defecto de Electron en la barra de tareas
+// durante la ejecución. Se busca junto al código y en resources/ para que
+// funcione tanto en desarrollo como empaquetado.
+function findIcon(){
+  const cands = [
+    path.join(__dirname, '..', 'build', 'icon.ico'),
+    path.join(__dirname, '..', 'build', 'icon.png'),
+    path.join(process.resourcesPath || '', 'build', 'icon.ico'),
+    path.join(process.resourcesPath || '', 'icon.ico')
+  ];
+  for(const c of cands){ try{ if(fs.existsSync(c)) return c; }catch(e){} }
+  return null;
+}
+const ICON_PATH = findIcon();
 
 // ── GPU / WebGL ──────────────────────────────────────────────────────
 // BioSim es una app Three.js: sin WebGL no hay nada que mostrar. Estos
@@ -69,8 +86,9 @@ function createMainWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 680,
-    backgroundColor: '#f0f2f6',
+    backgroundColor: '#0d2145',   // v8.0: azul del logo, evita el fogonazo blanco al abrir
     title: 'BioSim ' + APP_VERSION,
+    icon: ICON_PATH || undefined,
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -179,6 +197,7 @@ function buildMenu() {
               type: 'info',
               title: 'Acerca de BioSim',
               message: 'BioSim ' + APP_VERSION,
+              icon: ICON_PATH ? nativeImage.createFromPath(ICON_PATH) : undefined,
               detail:
                 'Simulador bioclimático autocontenido.\n' +
                 'Universidad de San Buenaventura — Pasto.\n\n' +
