@@ -1,6 +1,6 @@
 {
   "name": "biosim",
-  "version": "8.0.0",
+  "version": "8.0.1",
   "description": "BioSim — Simulador bioclimatico autocontenido (escritorio)",
   "author": "Universidad de San Buenaventura - Pasto",
   "license": "UNLICENSED",
@@ -27,6 +27,12 @@
       "src/**/*",
       "BioSim.html",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
     ],
     "compression": "maximum",
     "win": {
