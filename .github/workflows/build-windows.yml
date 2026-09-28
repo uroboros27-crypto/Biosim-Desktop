@@ -66,10 +66,6 @@ jobs:
           }
           Write-Host ("Icono: {0:N0} bytes" -f (Get-Item 'build/icon.ico').Length)
 
-          $viejos = @(Get-ChildItem -Path . -Filter 'BioSim_v*.html' -File)
-          if ($viejos.Count -gt 0) {
-            Write-Warning ('Hay versiones antiguas del HTML en el repositorio: ' + ($viejos.Name -join ', ') + '. No se empaquetan, pero conviene borrarlas.')
-          }
 
       - name: Install dependencies
         run: npm install
@@ -91,6 +87,15 @@ jobs:
           }
           Write-Host 'HTML empaquetado correctamente:'
           $encontrado | ForEach-Object { Write-Host "  $_" }
+
+          # El icono de la VENTANA se lee en tiempo de ejecucion desde
+          # resources/icon.ico (extraResources). Sin el, la barra de tareas
+          # muestra el icono generico de Electron.
+          if (-not (Test-Path 'dist/win-unpacked/resources/icon.ico')) {
+            Write-Error 'Falta resources/icon.ico en el paquete. Revisa build.extraResources en package.json.'
+            exit 1
+          }
+          Write-Host 'Icono de ventana empaquetado: resources/icon.ico'
 
       - name: Listar binarios generados
         shell: pwsh
