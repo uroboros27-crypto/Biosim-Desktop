@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v8.1</title>
+<title>BioSim v8.2</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4158,6 +4158,8 @@ canvas#cv{display:block;}
       <a onclick="invertirNormalesSeleccion()" title="Invierte la normal de las superficies seleccionadas. La normal decide qué caras reciben sol, el factor de vista al cielo y la clasificación cubierta/losa.">⇅ Invertir normal de la selección</a>
       <a onclick="restaurarNormalesSeleccion()" title="Devuelve la selección a la orientación de la geometría importada.">↺ Restaurar normales originales</a>
       <hr>
+      <a onclick="abrirReorientarModelo()" title="Corrige un modelo que llegó acostado o girado: indique qué eje apunta ahora hacia arriba y cuál al norte.">🧭 Reorientar ejes del modelo…</a>
+      <hr>
       <a onclick="togOpacity()">◻ Transparente</a>
     </div>
   </div>
@@ -4754,7 +4756,7 @@ canvas#cv{display:block;}
         <div class="btab" onclick="showBTab('bPerfil')" id="tabPerfil">⏱ Perfil Horario</div>
         <div class="btab" onclick="showBTab('bConf')">🌡 Confort</div>
         <div class="btab" onclick="showBTab('bStat')">📊 Estadísticas</div>
-        <div class="btab" onclick="showBTab('bReport')">📋 Informe</div>
+        <div class="btab" onclick="showBTab('bReport')">📋 Balance</div>
         <div class="btab" onclick="showBTab('bRad')">☀ Radiación</div>
         <!-- v5.3: pestaña Estudio de Temporadas -->
         <div class="btab" onclick="showBTab('bSeason')" title="Análisis térmico estacional (períodos preconfigurados)">🌗 Temporadas</div>
@@ -5569,7 +5571,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v8.1 — listo. Doble clic sobre una cara subdividida selecciona solo esa porción.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v8.2 — listo. Al abrir un modelo, elija el programa de origen para que no llegue rotado; Modelo → Reorientar ejes corrige uno ya importado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -9036,6 +9038,8 @@ function _showImportAddDialog(){
       </div>`}
 
       <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;margin-bottom:8px">
+        ${_axesFormHTML('imAddAx', importAxes)}
+
         <label style="font-weight:600">Unidades del archivo</label>
         <select id="imAddUnits" onchange="_imAddOnUnitChange()" style="padding:3px 6px;border-radius:4px;border:1px solid #c8d0e0;font-size:.7rem">
           <option value="1"     ${suggestedUnit==='m' ?'selected':''}>Metros (×1)</option>
@@ -9133,6 +9137,9 @@ function _imAddConfirm(){
   const rotY  = parseFloat(document.getElementById('imAddRotY').value) || 0;
   const zoneStrat = document.getElementById('imAddZone').value;
   const zoneName  = document.getElementById('imAddZoneName').value.trim() || `Importado · ${p.fname}`;
+  const axes = _axesReadForm('imAddAx');           // v8.2
+  if(!axes) return;
+  _rememberImportAxes(axes);
 
   const opts = {
     mode: 'add',
@@ -9141,7 +9148,8 @@ function _imAddConfirm(){
     scale: scale,
     targetZoneStrategy: zoneStrat,
     newZoneName: zoneName,
-    sourceName: p.fname
+    sourceName: p.fname,
+    axes: axes
   };
 
   const dlg = document.getElementById('importAddDlg');
@@ -9160,12 +9168,24 @@ document.getElementById('fMOD').addEventListener('change',function(e){
   const file=e.target.files[0]; if(!file) return;
   const ext=file.name.split('.').pop().toLowerCase();
   log(`Cargando: ${file.name}…`);
+  if(!['glb','gltf','obj','stl'].includes(ext)){ log('Formato no soportado.','err'); e.target.value=''; return; }
   const reader=new FileReader();
   reader.onload=ev=>{
-    if(ext==='glb'||ext==='gltf') importGLTF(ev.target.result, file.name);
-    else if(ext==='obj') importOBJ(ev.target.result, file.name);
-    else if(ext==='stl') importSTL(ev.target.result, file.name);
-    else log('Formato no soportado.','err');
+    const buf=ev.target.result;
+    // v8.2: el archivo no dice qué eje es «arriba»: se pregunta
+    _showAxesDialog({
+      id:'importAxesDlg',
+      title:'📂 Abrir modelo 3D',
+      intro:`<b>${file.name}</b> reemplazará el modelo actual. Indique de qué programa viene la geometría para que no llegue rotada.`,
+      okLabel:'Importar',
+      onOk:ax=>{
+        _rememberImportAxes(ax);
+        const opts={axes:ax};
+        if(ext==='glb'||ext==='gltf') importGLTF(buf, file.name, opts);
+        else if(ext==='obj') importOBJ(buf, file.name, opts);
+        else importSTL(buf, file.name, opts);
+      }
+    });
   };
   if(ext==='obj') reader.readAsText(file);
   else reader.readAsArrayBuffer(file);
@@ -9177,12 +9197,15 @@ function importGLTF(buf, fname, opts){
   function load(){
     new THREE.GLTFLoader().parse(buf,'',(gltf)=>{
       gltf.scene.updateMatrixWorld(true);
+      const _axIn = opts && opts.axes;
+      const _axM = (_axIn && _axesValid(_axIn) && !_axesIsIdentity(_axIn)) ? _axesMatrix4(_axIn) : null;
       const raw=[];
       let totalRemoved = 0;
       gltf.scene.traverse(obj=>{
         if(!obj.isMesh) return;
         const g=obj.geometry.clone();
         g.applyMatrix4(obj.matrixWorld); // flatten hierarchy
+        if(_axM) g.applyMatrix4(_axM);   // v8.2: ejes del archivo de origen
         // Limpiar triángulos degenerados
         const cleaned = cleanDegenerateTris(g, 1e-7);
         totalRemoved += cleaned.removed;
@@ -9216,11 +9239,246 @@ function importGLTF(buf, fname, opts){
 // Importador robusto: usa earcut para polígonos no-convexos en vez de
 // triangulación en abanico ingenua. Filtra triángulos degenerados antes
 // de devolver la geometría.
+// ═══════════════════════════════════════════════════════════════════
+//  v8.2 — EJES DE LA GEOMETRÍA DE ORIGEN
+//
+//  BioSim trabaja con +X = Este, +Y = arriba, −Z = Norte (convención de
+//  Three.js, idéntica a la de los OBJ/DAE que exporta SketchUp). Otros
+//  programas exportan con Z hacia arriba (Rhino, Revit, AutoCAD, ArchiCAD)
+//  y el modelo llegaba «acostado». El usuario indica qué eje del archivo
+//  apunta hacia arriba y cuál hacia el norte, y la geometría se rota ANTES
+//  de descomponerla en superficies (así los sufijos _Techo/_N/_S… y las
+//  etiquetas automáticas salen bien desde el principio).
+//
+//  Códigos de eje: 0 +X · 1 −X · 2 +Y · 3 −Y · 4 +Z · 5 −Z
+//  La transformación es una rotación propia (determinante +1): conserva el
+//  sentido de giro de los triángulos y, con él, las normales.
+// ═══════════════════════════════════════════════════════════════════
+const AXIS_NAMES = ['+X','−X','+Y','−Y','+Z','−Z'];
+const AXIS_PRESETS = [
+  {id:'sketchup', name:'SketchUp (OBJ/DAE) — Y arriba, norte −Z',               up:2, north:5},
+  {id:'blender',  name:'Blender / 3ds Max (OBJ) — Y arriba, norte −Z',          up:2, north:5},
+  {id:'zup',      name:'Rhino / Revit / AutoCAD / ArchiCAD — Z arriba, norte +Y', up:4, north:2},
+  {id:'ypz',      name:'Y arriba, norte +Z',                                     up:2, north:4},
+  {id:'custom',   name:'Personalizado…',                                          up:-1, north:-1}
+];
+const AXES_IDENTITY = {up:2, north:5};
+
+let importAxes = (function(){
+  try{
+    const v = JSON.parse(localStorage.getItem('biosim.importAxes')||'null');
+    if(v && _axesValid(v)) return {up:v.up|0, north:v.north|0, preset:v.preset||null};
+  }catch(e){}
+  return {up:2, north:5, preset:'sketchup'};
+})();
+function _rememberImportAxes(ax){
+  importAxes = {up:ax.up, north:ax.north, preset:ax.preset||null};
+  try{ localStorage.setItem('biosim.importAxes', JSON.stringify(importAxes)); }catch(e){}
+}
+
+function _axisVec(a){
+  return [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]][a] || [0,1,0];
+}
+function _axesValid(ax){
+  if(!ax) return false;
+  const u=ax.up|0, n=ax.north|0;
+  return u>=0 && u<6 && n>=0 && n<6 && (u>>1)!==(n>>1);   // distintos y perpendiculares
+}
+function _axesIsIdentity(ax){ return !ax || (ax.up===2 && ax.north===5); }
+
+// Filas de la matriz: x' = p·Este, y' = p·Arriba, z' = −(p·Norte)
+// con Este = Norte × Arriba (terna derecha).
+function _axesRows(ax){
+  const U=_axisVec(ax.up), N=_axisVec(ax.north);
+  const E=[N[1]*U[2]-N[2]*U[1], N[2]*U[0]-N[0]*U[2], N[0]*U[1]-N[1]*U[0]];
+  return [E, U, [-N[0],-N[1],-N[2]]];
+}
+function _axesMatrix4(ax){
+  const [r0,r1,r2]=_axesRows(ax);
+  return new THREE.Matrix4().set(
+    r0[0],r0[1],r0[2],0,
+    r1[0],r1[1],r1[2],0,
+    r2[0],r2[1],r2[2],0,
+    0,0,0,1);
+}
+// Aplica los ejes a un arreglo plano x,y,z,x,y,z… (en su sitio)
+function _applyAxesFlat(arr, ax){
+  if(_axesIsIdentity(ax) || !_axesValid(ax)) return arr;
+  const [r0,r1,r2]=_axesRows(ax);
+  for(let i=0;i+2<arr.length;i+=3){
+    const x=arr[i], y=arr[i+1], z=arr[i+2];
+    arr[i]   = r0[0]*x + r0[1]*y + r0[2]*z;
+    arr[i+1] = r1[0]*x + r1[1]*y + r1[2]*z;
+    arr[i+2] = r2[0]*x + r2[1]*y + r2[2]*z;
+  }
+  return arr;
+}
+function _axesPresetOf(ax){
+  if(ax && ax.preset){ const p=AXIS_PRESETS.find(q=>q.id===ax.preset); if(p && (p.id==='custom' || (p.up===ax.up && p.north===ax.north))) return p; }
+  return AXIS_PRESETS.find(p=>p.up===ax.up && p.north===ax.north) || AXIS_PRESETS[AXIS_PRESETS.length-1];
+}
+function _axesLabel(ax){
+  const p=_axesPresetOf(ax);
+  return p.id==='custom' ? `personalizado: arriba ${AXIS_NAMES[ax.up]}, norte ${AXIS_NAMES[ax.north]}` : p.name;
+}
+
+// ── Controles de formulario reutilizables (rejilla de 2 columnas) ──────
+const _AX_SEL_STYLE='padding:3px 6px;border-radius:4px;border:1px solid #c8d0e0;font-size:.7rem';
+function _axesFormHTML(pfx, ax){
+  const cur=_axesPresetOf(ax);
+  const opts=AXIS_PRESETS.map(p=>`<option value="${p.id}" ${p.id===cur.id?'selected':''}>${p.name}</option>`).join('');
+  const axOpts=sel=>AXIS_NAMES.map((n,i)=>`<option value="${i}" ${i===sel?'selected':''}>${n}</option>`).join('');
+  const hid = cur.id==='custom' ? '' : 'display:none;';
+  return `
+    <label style="font-weight:600">Programa de origen<br><span style="font-size:.55rem;color:#888;font-weight:400">ejes del archivo</span></label>
+    <select id="${pfx}Preset" onchange="_axesOnPresetChange('${pfx}')" style="${_AX_SEL_STYLE}">${opts}</select>
+    <label class="${pfx}Cust" style="${hid}font-weight:600">Eje hacia arriba</label>
+    <select class="${pfx}Cust" id="${pfx}Up" style="${hid}${_AX_SEL_STYLE}">${axOpts(ax.up)}</select>
+    <label class="${pfx}Cust" style="${hid}font-weight:600">Eje hacia el norte</label>
+    <select class="${pfx}Cust" id="${pfx}North" style="${hid}${_AX_SEL_STYLE}">${axOpts(ax.north)}</select>`;
+}
+function _axesOnPresetChange(pfx){
+  const id=document.getElementById(pfx+'Preset').value;
+  const p=AXIS_PRESETS.find(q=>q.id===id);
+  document.querySelectorAll('.'+pfx+'Cust').forEach(el=>el.style.display = id==='custom' ? '' : 'none');
+  if(p && p.up>=0){ document.getElementById(pfx+'Up').value=p.up; document.getElementById(pfx+'North').value=p.north; }
+}
+// Devuelve {up,north,preset} o null (y avisa) si los ejes no son válidos
+function _axesReadForm(pfx){
+  const id=document.getElementById(pfx+'Preset').value;
+  const p=AXIS_PRESETS.find(q=>q.id===id);
+  const ax = (p && p.up>=0) ? {up:p.up, north:p.north, preset:p.id}
+    : {up:+document.getElementById(pfx+'Up').value, north:+document.getElementById(pfx+'North').value, preset:'custom'};
+  if(!_axesValid(ax)){ alert('El eje hacia arriba y el eje hacia el norte deben ser distintos y perpendiculares (p. ej. +Z arriba y +Y norte).'); return null; }
+  return ax;
+}
+
+// Diálogo modal genérico con el selector de ejes.
+// o = {id, title, intro, extraHTML, okLabel, onOk(ax, dlg)}
+function _showAxesDialog(o){
+  let dlg=document.getElementById(o.id); if(dlg) dlg.remove();
+  dlg=document.createElement('div'); dlg.id=o.id;
+  dlg.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;font-family:Inter,sans-serif;color:#223';
+  dlg.innerHTML=`
+    <div style="background:#fff;border-radius:8px;padding:16px 20px;width:480px;max-width:92vw;box-shadow:0 18px 50px rgba(0,0,0,0.35);font-size:.72rem">
+      <div style="font-size:.85rem;font-weight:700;color:#22aabb;margin-bottom:4px">${o.title}</div>
+      <div style="font-size:.62rem;color:#667;margin-bottom:10px;line-height:1.5">${o.intro}</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;margin-bottom:10px">
+        ${_axesFormHTML(o.id+'Ax', o.axes||importAxes)}
+        ${o.extraHTML||''}
+      </div>
+      <div style="background:#f6f8fa;border:1px solid #e0e4ec;border-radius:5px;padding:6px 10px;margin-bottom:10px;font-size:.6rem;color:#557;line-height:1.5">
+        BioSim usa <b>+Y arriba</b> y <b>−Z norte</b> (+X este), igual que SketchUp. Si el modelo llega acostado,
+        el archivo tiene otro eje vertical: elija el programa de origen o «Personalizado…».
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:6px">
+        <button data-act="cancel" style="padding:5px 12px;background:#eef;border:1px solid #c8d0e0;border-radius:4px;cursor:pointer;font-size:.7rem">Cancelar</button>
+        <button data-act="ok" style="padding:5px 14px;background:#22aabb;border:none;border-radius:4px;cursor:pointer;color:#fff;font-weight:700;font-size:.7rem">${o.okLabel||'Aceptar'}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(dlg);
+  const close=()=>{ dlg.remove(); document.removeEventListener('keydown',onKey,true); };
+  const ok=()=>{ const ax=_axesReadForm(o.id+'Ax'); if(!ax) return; const keep=o.onOk(ax,dlg); if(keep!==false) close(); };
+  const onKey=e=>{ if(e.key==='Escape'){ e.stopPropagation(); close(); } else if(e.key==='Enter'){ e.stopPropagation(); e.preventDefault(); ok(); } };
+  document.addEventListener('keydown',onKey,true);
+  dlg.querySelector('[data-act=cancel]').onclick=close;
+  dlg.querySelector('[data-act=ok]').onclick=ok;
+}
+
+// ── Reorientar el modelo YA importado (o la selección) ───────────────
+// «¿Cómo está orientado ahora?»: se trata la geometría actual como si
+// viniera de un archivo con esos ejes y se lleva a +Y arriba / −Z norte,
+// girando alrededor del centro de su caja y conservando la cota de apoyo.
+const _HINT_RE = /_(E|O|N|S|Techo|Piso)(\s\(\d+\))?$/;
+function _hintForNormal(n){
+  const H=[['E',1,0,0],['O',-1,0,0],['N',0,0,-1],['S',0,0,1],['Techo',0,1,0],['Piso',0,-1,0]];
+  let best='E', bd=-2;
+  H.forEach(([h,x,y,z])=>{ const d=x*n.x+y*n.y+z*n.z; if(d>bd){bd=d;best=h;} });
+  return best;
+}
+function _avgNormal(geo){
+  const p=geo.attributes.position, idx=geo.index, n=idx?idx.count:p.count;
+  const A=new THREE.Vector3(),B=new THREE.Vector3(),C=new THREE.Vector3(),acc=new THREE.Vector3();
+  for(let i=0;i+2<n;i+=3){
+    A.fromBufferAttribute(p, idx?idx.getX(i):i);
+    B.fromBufferAttribute(p, idx?idx.getX(i+1):i+1);
+    C.fromBufferAttribute(p, idx?idx.getX(i+2):i+2);
+    acc.add(B.sub(A).cross(C.sub(A)));   // ponderado por área
+  }
+  return acc.normalize();
+}
+function reorientarModelo(ax, onlySel){
+  if(_axesIsIdentity(ax)){ log('Con +Y arriba y −Z norte el modelo ya está en los ejes de BioSim: no hay nada que girar.','warn'); return; }
+  const targets = onlySel ? surfaces.filter(s=>sel.has(s.id) && s.mesh) : surfaces.filter(s=>s.mesh);
+  if(targets.length===0){ log(onlySel?'No hay superficies seleccionadas.':'No hay modelo cargado.','warn'); return; }
+  const locked = targets.filter(s=>isSurfaceLocked(s));
+  if(locked.length){ log(`🔒 ${locked.length} superficie(s) en zonas bloqueadas — reorientación cancelada. Desbloquéalas primero.`,'warn'); return; }
+  _undoPush();   // estado ANTES del cambio
+  // 1) Hornear la transformación de cada malla en su geometría
+  const box0=new THREE.Box3();
+  targets.forEach(s=>{
+    s.mesh.updateMatrix();
+    s.mesh.geometry.applyMatrix4(s.mesh.matrix);
+    s.mesh.position.set(0,0,0); s.mesh.rotation.set(0,0,0); s.mesh.scale.set(1,1,1);
+    s.mesh.geometry.computeBoundingBox(); box0.union(s.mesh.geometry.boundingBox);
+  });
+  const c=new THREE.Vector3(); box0.getCenter(c);
+  // 2) Girar alrededor del centro
+  const M=new THREE.Matrix4().makeTranslation(c.x,c.y,c.z)
+    .multiply(_axesMatrix4(ax))
+    .multiply(new THREE.Matrix4().makeTranslation(-c.x,-c.y,-c.z));
+  const box1=new THREE.Box3();
+  targets.forEach(s=>{ s.mesh.geometry.applyMatrix4(M); s.mesh.geometry.computeBoundingBox(); box1.union(s.mesh.geometry.boundingBox); });
+  // 3) Conservar el centro en planta y la cota de apoyo
+  const c1=new THREE.Vector3(); box1.getCenter(c1);
+  const T=new THREE.Matrix4().makeTranslation(c.x-c1.x, box0.min.y-box1.min.y, c.z-c1.z);
+  let renamed=0;
+  targets.forEach(s=>{
+    const g=s.mesh.geometry;
+    g.applyMatrix4(T); g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
+    _rebuildSurfaceEdges(s.mesh);
+    // Sufijo de orientación del importador (_Techo, _N…): recalcular
+    if(_HINT_RE.test(s.name||'')){
+      const h=_hintForNormal(_avgNormal(g));
+      const nn=s.name.replace(_HINT_RE,(m,old,dup)=>`_${h}${dup||''}`);
+      if(nn!==s.name){ s.name=nn; renamed++; }
+    }
+  });
+  _enforceUniqueSurfNames();
+  invalidateShadowCache();
+  if(typeof _refreshNormalsViz==='function') _refreshNormalsViz();
+  _refreshViewMode();
+  updateSelVis(); renderZoneTree(); updateStatus();
+  if(!onlySel) fitAll();
+  log(`🧭 ${targets.length} superficie(s) reorientada(s) desde «${_axesLabel(ax)}»${renamed?` · ${renamed} nombre(s) de orientación actualizados`:''}. Vuelve a calcular radiación/simulación. Ctrl+Z para deshacer.`,'ok');
+}
+function abrirReorientarModelo(){
+  if(surfaces.length===0){ log('No hay modelo cargado.','warn'); return; }
+  const nSel=sel.size;
+  _showAxesDialog({
+    id:'reorientDlg',
+    title:'🧭 Reorientar ejes del modelo',
+    intro:'Indique cómo está orientado <b>ahora</b> el modelo, como si viniera de ese programa. BioSim lo girará para que quede con Y arriba y el norte en −Z, conservando su posición en planta y su cota de apoyo.',
+    axes:{up:4, north:2, preset:'zup'},
+    extraHTML: nSel>0 ? `
+      <label style="font-weight:600">Aplicar a</label>
+      <select id="reorientScope" style="${_AX_SEL_STYLE}">
+        <option value="sel" selected>Solo la selección (${nSel} sup.)</option>
+        <option value="all">Todo el modelo</option>
+      </select>` : '',
+    okLabel:'Reorientar',
+    onOk:ax=>{ const sc=document.getElementById('reorientScope'); reorientarModelo(ax, !!sc && sc.value==='sel'); }
+  });
+}
+
 function importOBJ(text, fname, opts){
   const verts=[], geoms=[];
   let curName='Mesh', faceCounter=0;
   let curTris=[];                       // sopa de triángulos pendiente de fusión
   let nonConvexHits = 0, degenHits = 0, totalTris = 0;
+  // v8.2: ejes del archivo de origen (null = ya está en los ejes de BioSim)
+  const _axIn = opts && opts.axes;
+  const _ax = (_axIn && _axesValid(_axIn) && !_axesIsIdentity(_axIn)) ? _axesRows(_axIn) : null;
 
   // v6.9 — Importación robusta con DOS criterios según cómo venga cada cara:
   //
@@ -9270,7 +9528,12 @@ function importOBJ(text, fname, opts){
   text.split('\n').forEach(raw=>{
     const line=raw.trim(); if(!line||line[0]==='#') return;
     const p=line.split(/\s+/);
-    if(p[0]==='v') verts.push(+p[1]||0, +p[2]||0, +p[3]||0);
+    if(p[0]==='v'){
+      if(_ax){
+        const x=+p[1]||0, y=+p[2]||0, z=+p[3]||0;
+        verts.push(_ax[0][0]*x+_ax[0][1]*y+_ax[0][2]*z, _ax[1][0]*x+_ax[1][1]*y+_ax[1][2]*z, _ax[2][0]*x+_ax[2][1]*y+_ax[2][2]*z);
+      } else verts.push(+p[1]||0, +p[2]||0, +p[3]||0);
+    }
     else if(p[0]==='g'||p[0]==='o'){
       flushTris();                              // cerrar la sopa del grupo actual
       curName=p.slice(1).join('_')||'Mesh';
@@ -9330,6 +9593,7 @@ function importOBJ(text, fname, opts){
   else {
     registrar(geoms, Object.assign({sourceName:fname||'OBJ'}, opts||{}));
     let msg = `OBJ: ${geoms.length} superficies (${totalTris} triángulos)`;
+    if(_ax) msg += ` · ejes: ${_axesLabel(_axIn)}`;
     if(nonConvexHits > 0)  msg += ` · ${nonConvexHits} polígono(s) no-convexo(s) procesado(s) con earcut`;
     if(degenHits > 0)      msg += ` · ${degenHits} triángulo(s) degenerado(s) descartado(s)`;
     log(msg, 'ok');
@@ -9357,6 +9621,10 @@ function importSTL(buf, fname, opts){
     positions=new Float32Array(nums);
   }
 
+  // v8.2: ejes del archivo de origen
+  const _axIn = opts && opts.axes;
+  if(_axIn && _axesValid(_axIn)) _applyAxesFlat(positions, _axIn);
+
   const geo=new THREE.BufferGeometry();
   geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
   geo.computeVertexNormals();
@@ -9367,6 +9635,7 @@ function importSTL(buf, fname, opts){
   const parts=descomponerPorNormales(baseName, cleaned.geo);
   registrar(parts, Object.assign({sourceName:fname||'STL'}, opts||{}));
   let msg = `STL: ${parts.length} superficies por descomposición`;
+  if(_axIn && !_axesIsIdentity(_axIn)) msg += ` · ejes: ${_axesLabel(_axIn)}`;
   if(cleaned.removed > 0) msg += ` · ${cleaned.removed} triángulo(s) degenerado(s) eliminado(s)`;
   log(msg+'.','ok');
 }
@@ -10532,8 +10801,9 @@ function showSurfProps(surf){
     </div>`).join('');
   document.getElementById('rConstContent').innerHTML=`
     <div style="font-size:.68rem;font-weight:700;color:var(--text3);margin-bottom:6px">${surf.name}</div>
-    <div style="font-size:.6rem;color:var(--text3);margin-bottom:5px;font-family:var(--font-mono)">← EXT · · · INT →</div>
+    <div style="font-size:.6rem;color:var(--text3);margin-bottom:5px;font-family:var(--font-mono)" title="La capa 1 da al exterior; la última, al recinto">↑ EXTERIOR · capa 1</div>
     ${lHtml}
+    <div style="font-size:.6rem;color:var(--text3);margin:3px 0 2px;font-family:var(--font-mono)">↓ INTERIOR · última capa</div>
     <button class="btn btn-g btn-xs" style="width:100%;margin-top:5px" onclick="addSurfLayer('${surf.id}')">＋ Capa</button>
     <div class="chip" style="margin-top:8px"><span class="cl">U total</span><span class="cv ${uc}">${p.U.toFixed(3)} W/m²K</span></div>
     <div class="chip" style="margin-top:3px"><span class="cl">R total</span><span class="cv">${p.R.toFixed(3)} m²K/W</span></div>`;
@@ -10832,7 +11102,7 @@ function _renderMultiConstructions(surfs){
     html += `<div style="font-size:.6rem;color:#393;background:rgba(80,200,150,0.10);border:1px solid rgba(80,200,150,0.35);border-radius:4px;padding:5px 8px;margin-bottom:8px">
       ✓ Plantilla de capas uniforme. Los cambios se aplican a todas las superficies.
     </div>
-    <div style="font-size:.6rem;color:var(--text3);margin-bottom:5px;font-family:var(--font-mono)">← EXT · · · INT →</div>`;
+    <div style="font-size:.6rem;color:var(--text3);margin-bottom:5px;font-family:var(--font-mono)" title="La capa 1 da al exterior; la última, al recinto">↑ EXTERIOR · capa 1</div>`;
 
     refLayers.forEach((l, li) => {
       const eUni = eUniform[li];
@@ -10850,6 +11120,7 @@ function _renderMultiConstructions(surfs){
         <button class="le-d" onclick="editLayerDeleteMulti(${li})" title="Eliminar esta capa en todas las superficies">✕</button>
       </div>`;
     });
+    html += `<div style="font-size:.6rem;color:var(--text3);margin:3px 0 2px;font-family:var(--font-mono)">↓ INTERIOR · última capa</div>`;
     html += `<button class="btn btn-g btn-xs" style="width:100%;margin-top:5px" onclick="editLayerAddMulti()">＋ Añadir capa a todas</button>`;
 
     // U-value: mostrar agregado
@@ -21982,7 +22253,7 @@ function generarInforme(){
   const eB=window._eBalance, eZ=window._eBalanceZones;
   const div=document.getElementById('reportHtml');
   if(!eB||!eZ||results.length===0){
-    div.innerHTML='<p style="color:#7a90b8;padding:12px">Ejecuta la simulación primero para generar el informe.</p>';
+    div.innerHTML='<p style="color:#7a90b8;padding:12px">Ejecuta la simulación primero para generar el balance.</p>';
     return;
   }
 
@@ -23754,7 +24025,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v8.1
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v8.2
   </div>
 </div>
 <script>
@@ -25716,7 +25987,7 @@ H[j][i] += UA_ij`)}
       "Perfil Horario", "Análisis de Confort", "Estadísticas", "Radiación Solar". Abre una ventana del navegador
       lista para imprimir o guardar como PDF con Ctrl+P / Cmd+P.
       <br><br>
-      <strong>Informe global de balance</strong> (botón "⬇ Exportar PDF" en pestaña Reportes): consolida balance
+      <strong>Informe global de balance</strong> (botón "⬇ Exportar PDF" en la pestaña Balance): consolida balance
       energético por zona, distribución de ganancias y pérdidas, indicadores de confort, recomendaciones, y
       todos los gráficos.
       <br><br>
