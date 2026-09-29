@@ -1,6 +1,6 @@
 # BioSim — Aplicación de escritorio para Windows
 
-Empaqueta el simulador bioclimático **BioSim v8.0** (un único HTML autocontenido,
+Empaqueta el simulador bioclimático **BioSim v8.1** (un único HTML autocontenido,
 zero-CDN) como aplicación nativa de Windows usando **Electron**.
 
 Electron incluye su propio Chromium, así que el `.exe` **no depende de WebView2
@@ -29,8 +29,8 @@ Biosim-Desktop/
 
 1. **Versión estable:** sube la versión en `package.json` y empuja una etiqueta:
    ```bash
-   git tag v8.0.1
-   git push origin v8.0.1
+   git tag v8.1.0
+   git push origin v8.1.0
    ```
    Compila y publica un **Release** con los `.exe` adjuntos.
 2. **Build de prueba:** Actions → "Build Windows" → *Run workflow*. Publica un

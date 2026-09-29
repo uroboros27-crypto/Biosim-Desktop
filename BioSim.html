@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v8.0</title>
+<title>BioSim v8.1</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4186,6 +4186,7 @@ canvas#cv{display:block;}
       <a onclick="selectAll()">⬚ Seleccionar todo</a>
       <a onclick="clearSelection()">▢ Deseleccionar todo</a>
       <a onclick="invertSelection()">⇄ Invertir selección</a>
+      <a onclick="separarPorcionesSeleccion()" title="Separa cada superficie seleccionada en las porciones delimitadas por sus líneas visibles. Atajo: doble clic sobre una porción para seleccionar solo esa.">✂ Separar en porciones</a>
       <hr>
       <a onclick="selectByTag('muro')">🧱 Todos los muros</a>
       <a onclick="selectByTag('cubierta')">🏠 Todas las cubiertas</a>
@@ -5568,7 +5569,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v8.0 — listo.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v8.1 — listo. Doble clic sobre una cara subdividida selecciona solo esa porción.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -6563,7 +6564,10 @@ function onDbl(e){
     // Set guard so the click that fired just before dblclick doesn't double-add
     _dblClickGuard=true;
     finishPoly();
+    return;
   }
+  // v8.1: doble clic con SEL → seleccionar la porción de la cara bajo el cursor
+  if(activeTool==='sel' && !_itState) seleccionarPorcionEn(e);
 }
 
 function onML(){
@@ -16292,6 +16296,215 @@ function eliminarSeleccion(){
   log('Selección eliminada.','ok');
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  v8.1 — PORCIONES DE SUPERFICIE
+//
+//  Una superficie importada puede contener varias «porciones»: caras que el
+//  importador fundió en una sola superficie (coplanares o con quiebre menor
+//  al umbral ARISTA) pero que se ven separadas por una línea en el visor.
+//  Esa línea es una arista de EdgesGeometry: o bien un quiebre angular, o
+//  bien una arista que no comparten exactamente dos triángulos (junta en T,
+//  vértices duplicados). Aquí se usa EXACTAMENTE el mismo criterio que las
+//  aristas amarillas de selección (__edges__, 15°), de modo que cada región
+//  encerrada por líneas visibles es una porción seleccionable.
+//
+//  · Doble clic (herramienta SEL) sobre una superficie → la separa en sus
+//    porciones y selecciona solo la porción bajo el cursor.
+//    Ctrl/Shift + doble clic → añade la porción a la selección.
+//  · Selección → «Separar en porciones» y el menú contextual → separa todas
+//    las superficies seleccionadas y deja seleccionadas todas las porciones.
+//  Las porciones heredan zona, capas, etiqueta, tipo y demás propiedades.
+//  Ctrl+Z deshace la separación.
+// ═══════════════════════════════════════════════════════════════════
+const PORTION_EDGE_DEG = 15;   // = umbral de las aristas de selección (__edges__)
+
+// Devuelve {pos, groups:[[triIdx…]…], triGroup:Int32Array} o null.
+function _surfacePortions(mesh){
+  const g = mesh && mesh.geometry;
+  if(!g || !g.attributes || !g.attributes.position) return null;
+  const src = g.index ? g.toNonIndexed() : g;
+  const pos = src.attributes.position;
+  const nTri = Math.floor(pos.count/3);
+  if(nTri === 0) return null;
+
+  // Normal y área de cada triángulo
+  const N = new Float32Array(nTri*3), area = new Float64Array(nTri), ok = new Uint8Array(nTri);
+  const A=new THREE.Vector3(), B=new THREE.Vector3(), C=new THREE.Vector3(), n=new THREE.Vector3();
+  let maxArea = 0;
+  for(let t=0;t<nTri;t++){
+    A.fromBufferAttribute(pos,t*3); B.fromBufferAttribute(pos,t*3+1); C.fromBufferAttribute(pos,t*3+2);
+    n.crossVectors(B.sub(A), C.sub(A));
+    const l = n.length();
+    area[t] = l/2; if(area[t] > maxArea) maxArea = area[t];
+    if(l > 1e-12){ n.divideScalar(l); N[t*3]=n.x; N[t*3+1]=n.y; N[t*3+2]=n.z; ok[t]=1; }
+  }
+  // Triángulos casi degenerados: su normal no es fiable → no cortan porciones
+  const tinyA = maxArea * 1e-6;
+  for(let t=0;t<nTri;t++) if(area[t] <= tinyA) ok[t]=0;
+
+  // Vértices soldados por posición (misma tolerancia que el importador)
+  if(!src.boundingBox) src.computeBoundingBox();
+  const PREC = _adaptiveVertexPrecision(src);
+  const keyId = new Map(), vid = new Int32Array(pos.count);
+  for(let i=0;i<pos.count;i++){
+    const k = Math.round(pos.getX(i)*PREC)+','+Math.round(pos.getY(i)*PREC)+','+Math.round(pos.getZ(i)*PREC);
+    let id = keyId.get(k);
+    if(id === undefined){ id = keyId.size; keyId.set(k,id); }
+    vid[i] = id;
+  }
+  // Aristas → triángulos que las usan
+  const edges = new Map();
+  for(let t=0;t<nTri;t++){
+    for(let e=0;e<3;e++){
+      const a=vid[t*3+e], b=vid[t*3+(e+1)%3];
+      if(a===b) continue;
+      const k = a<b ? a+'_'+b : b+'_'+a;
+      const arr = edges.get(k);
+      if(arr) arr.push(t); else edges.set(k,[t]);
+    }
+  }
+  // Unión: solo a través de aristas NO visibles (2 triángulos, ángulo < umbral)
+  const parent = new Int32Array(nTri); for(let t=0;t<nTri;t++) parent[t]=t;
+  const find = x => { while(parent[x]!==x){ parent[x]=parent[parent[x]]; x=parent[x]; } return x; };
+  const cosT = Math.cos(PORTION_EDGE_DEG*Math.PI/180);
+  edges.forEach(tris=>{
+    if(tris.length !== 2) return;                       // borde o no-manifold → línea visible
+    const a=tris[0], b=tris[1];
+    if(ok[a] && ok[b]){
+      const d = N[a*3]*N[b*3] + N[a*3+1]*N[b*3+1] + N[a*3+2]*N[b*3+2];
+      if(d < cosT) return;                              // quiebre visible
+    }
+    const ra=find(a), rb=find(b); if(ra!==rb) parent[ra]=rb;
+  });
+  // Agrupar
+  const rootIdx = new Map(), groups = [];
+  const triGroup = new Int32Array(nTri);
+  for(let t=0;t<nTri;t++){
+    const r = find(t);
+    let gi = rootIdx.get(r);
+    if(gi === undefined){ gi = groups.length; rootIdx.set(r,gi); groups.push([]); }
+    groups[gi].push(t); triGroup[t]=gi;
+  }
+  // Porciones sin área real (astillas sueltas) → a la porción más grande
+  if(groups.length > 1){
+    const gArea = groups.map(tr=>tr.reduce((s,t)=>s+area[t],0));
+    const total = gArea.reduce((a,b)=>a+b,0);
+    let big = 0; gArea.forEach((a,i)=>{ if(a>gArea[big]) big=i; });
+    const keep = [], remap = new Int32Array(groups.length).fill(-1);
+    groups.forEach((tr,i)=>{ if(i===big || gArea[i] > total*1e-5){ remap[i]=keep.length; keep.push(tr.slice()); } });
+    groups.forEach((tr,i)=>{ if(remap[i]===-1){ keep[remap[big]].push(...tr); remap[i]=remap[big]; } });
+    for(let t=0;t<nTri;t++) triGroup[t] = remap[triGroup[t]];
+    return {pos, groups:keep, triGroup};
+  }
+  return {pos, groups, triGroup};
+}
+
+function _cloneSurfField(v){
+  if(v === null || typeof v !== 'object') return v;
+  try{ return structuredClone(v); }catch(e){ return v; }
+}
+
+// Sustituye la superficie s por una superficie nueva por cada porción de P.
+// Devuelve las superficies creadas, en el orden de P.groups.
+function _splitSurfaceIntoPortions(s, P){
+  const old = s.mesh;
+  const parent = old.parent || getOrCreateRoot();
+  const color = old.userData.baseColor ? old.userData.baseColor.getHex() : 0x8899aa;
+  const baseName = s.name || 'Sup';
+  const idx = surfaces.indexOf(s);
+  surfaces.splice(idx,1);                 // liberar el nombre antes de numerar
+  const created = [];
+  P.groups.forEach((tris,k)=>{
+    const verts = new Float32Array(tris.length*9);
+    let vi = 0;
+    tris.forEach(t=>{ for(let e=0;e<3;e++){ const i=t*3+e;
+      verts[vi++]=P.pos.getX(i); verts[vi++]=P.pos.getY(i); verts[vi++]=P.pos.getZ(i); } });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(verts,3));
+    geo.computeVertexNormals(); geo.computeBoundingBox();
+    const mesh = makeMesh(geo, color);
+    mesh.name = old.name;
+    mesh.position.copy(old.position); mesh.rotation.copy(old.rotation); mesh.scale.copy(old.scale);
+    mesh.castShadow = old.castShadow; mesh.receiveShadow = old.receiveShadow;
+    parent.add(mesh);
+    const ns = {};
+    Object.keys(s).forEach(key=>{
+      if(key==='id'||key==='name'||key==='mesh'||key==='area') return;
+      ns[key] = _cloneSurfField(s[key]);
+    });
+    ns.id = 's'+(++_sid);
+    ns.mesh = mesh;
+    ns.area = Math.max(0.01, areaLocal(geo));
+    ns.name = _uniqueSurfName(`${baseName} · ${k+1}`);
+    surfaces.splice(idx+k, 0, ns);
+    created.push(ns);
+  });
+  disposeSurface(s);
+  return created;
+}
+
+function _afterPortionSplit(){
+  colorZona();
+  invalidateShadowCache();
+  _refreshViewMode();
+  _syncZoneVisibility();
+  _enforceUniqueSurfNames();
+  updateSelVis(); renderZoneTree(); updateStatus();
+  _refreshPropsPanel();
+}
+
+// Selección → «Separar en porciones» (y menú contextual)
+function separarPorcionesSeleccion(){
+  if(sel.size===0){ log('Selecciona primero una o más superficies.','warn'); return; }
+  if(_checkSelLockedAndWarn('separar en porciones')) return;
+  const targets = [];
+  sel.forEach(id=>{
+    const s = surfaces.find(x=>x.id===id);
+    if(!s || !s.mesh) return;
+    const P = _surfacePortions(s.mesh);
+    if(P && P.groups.length > 1) targets.push([s,P]);
+  });
+  if(targets.length===0){
+    log('Las superficies seleccionadas no tienen subdivisiones visibles: no hay porciones que separar.','warn');
+    return;
+  }
+  _undoPush();   // estado ANTES del cambio
+  const keep = [...sel].filter(id=>!targets.some(([s])=>s.id===id));
+  sel.clear(); keep.forEach(id=>sel.add(id));
+  let n = 0;
+  targets.forEach(([s,P])=>{ _splitSurfaceIntoPortions(s,P).forEach(ns=>{ sel.add(ns.id); n++; }); });
+  _afterPortionSplit();
+  log(`✂ ${targets.length} superficie(s) separada(s) en ${n} porciones. Ctrl+Z para deshacer.`,'ok');
+}
+
+// Doble clic con la herramienta SEL: seleccionar la porción bajo el cursor
+function seleccionarPorcionEn(e){
+  const {x,y,w,h} = canvasXY(e);
+  const ndc = toNDC(x,y,w,h);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, activeCamera ? activeCamera() : camera);
+  const all = ray.intersectObjects(getSelectableMeshes(), false);
+  const hits = sectionPlanes.some(p=>p.active) ? all.filter(hh=>_spPointIsVisible(hh.point)) : all;
+  if(hits.length===0 || hits[0].faceIndex == null) return;
+  const s = surfaces.find(q=>q.mesh===hits[0].object);
+  if(!s) return;
+  const P = _surfacePortions(s.mesh);
+  if(!P || P.groups.length < 2){
+    log(`"${s.name}" no tiene subdivisiones: ya es una sola porción.`,'info');
+    return;
+  }
+  const gi = P.triGroup[hits[0].faceIndex];
+  if(gi === undefined) return;
+  _undoPush();   // estado ANTES del cambio
+  const additive = e.ctrlKey || e.shiftKey;
+  const created = _splitSurfaceIntoPortions(s,P);
+  sel.delete(s.id);
+  if(!additive) sel.clear();
+  sel.add(created[gi].id);
+  _afterPortionSplit();
+  log(`✂ "${s.name}" separada en ${created.length} porciones · seleccionada "${created[gi].name}". Ctrl+Z para deshacer.`,'ok');
+}
+
 // Crear geometrías rápidas
 function crearCaja(){
   if(zones.length===0) crearZona('Zona 1',ZCOLS[0],60);
@@ -23541,7 +23754,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v8.0
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v8.1
   </div>
 </div>
 <script>
@@ -25788,6 +26001,10 @@ function toggleBottomPanel(force){
   <!-- Interior / Exterior toggle -->
   <div class="ctx-item" id="ctxToggleExt" onclick="ctxToggleExt()">
     <span class="ctx-icon">🔄</span> Cambiar tipo (ext/int)
+  </div>
+  <!-- v8.1: separar en porciones -->
+  <div class="ctx-item" id="ctxSplitPortions" onclick="hideCtxMenu();separarPorcionesSeleccion()">
+    <span class="ctx-icon">✂</span> Separar en porciones
   </div>
   <!-- Delete -->
   <div class="ctx-sep"></div>
