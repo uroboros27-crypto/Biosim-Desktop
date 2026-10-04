@@ -1,22 +1,25 @@
 # BioSim — Aplicación de escritorio para Windows
 
-Empaqueta el simulador bioclimático **BioSim v8.2** (un único HTML autocontenido,
-zero-CDN) como aplicación nativa de Windows usando **Electron**.
+Empaqueta el simulador bioclimático **BioSim v6.8** (un único HTML autocontenido)
+como aplicación nativa de Windows usando **Electron**.
 
-Electron incluye su propio Chromium, así que el `.exe` **no depende de WebView2
-ni de ningún runtime preinstalado**: funciona en cualquier **Windows 10+ x64**.
+Electron incluye su propio motor Chromium, por lo que el `.exe` resultante
+**no depende de WebView2 ni de ningún runtime preinstalado**: funciona en
+cualquier **Windows 10 o superior, x64**, tal cual.
 
 ---
 
 ## Estructura
 
 ```
-Biosim-Desktop/
-├─ BioSim.html                 ← la aplicación (autocontenida, sin recursos externos)
+biosim-desktop/
+├─ app/
+│  └─ BioSim_v6_8.html         ← la aplicación (intacta, zero-CDN)
 ├─ src/
 │  └─ main.js                  ← proceso principal de Electron (la ventana)
 ├─ build/
-│  └─ icon.ico                 ← icono (.exe, instalador y ventana)
+│  ├─ icon.ico                 ← icono de la app
+│  └─ icon.png
 ├─ .github/workflows/
 │  └─ build-windows.yml        ← compilación automática en GitHub
 ├─ package.json                ← configuración de electron-builder
@@ -27,27 +30,27 @@ Biosim-Desktop/
 
 ## Compilar en GitHub (recomendado)
 
-1. **Versión estable:** sube la versión en `package.json` y empuja una etiqueta:
+No necesitas instalar nada en tu equipo. Igual que con DaylightApp:
+
+1. Crea un repositorio en GitHub y sube esta carpeta.
+2. **Opción A — manual:** entra a la pestaña **Actions → "Build Windows" → Run workflow**.
+3. **Opción B — por versión:** crea una etiqueta y empújala:
    ```bash
-   git tag v8.2.1
-   git push origin v8.2.1
+   git tag v6.8.0
+   git push origin v6.8.0
    ```
-   Compila y publica un **Release** con los `.exe` adjuntos.
-2. **Build de prueba:** Actions → "Build Windows" → *Run workflow*. Publica un
-   pre-release con la etiqueta fija `dev-build`, que se sobrescribe en cada corrida.
+   Esto compila *y* publica un **Release** con los `.exe` adjuntos.
+4. Al terminar, descarga los artefactos desde la corrida de Actions (o desde el Release):
+   - **`BioSim-6.8.0-portable.exe`** → ejecutable portátil, **se abre sin instalar** (cumple tu requisito).
+   - **`BioSim-6.8.0-setup.exe`** → instalador clásico (permite elegir carpeta, crea acceso directo).
 
-Binarios generados:
-- **`BioSim-<versión>-portable.exe`** → se abre sin instalar.
-- **`BioSim-<versión>-setup.exe`** → instalador (elige carpeta, crea accesos directos).
-
-No se usan *artifacts* de Actions: consumían la cuota de 500 MB del plan gratuito.
-Los binarios de un Release no cuentan para esa cuota.
+Ambos llevan Chromium embebido; pesan ~150–200 MB, como era de esperar para esta opción.
 
 ---
 
 ## Probar/compilar localmente (opcional)
 
-Requiere [Node.js](https://nodejs.org) 18+.
+Requiere [Node.js](https://nodejs.org) 18+ instalado.
 
 ```bash
 npm install        # instala Electron + electron-builder
@@ -59,43 +62,30 @@ npm run dist       # genera dist/BioSim-*.exe (portable + instalador)
 
 ## Actualizar BioSim
 
-1. Reemplaza `BioSim.html` por la versión nueva **conservando ese nombre**.
-2. Sube `version` en `package.json` (es la que aparece en el título de la ventana
-   y en el nombre de los `.exe`).
-3. Crea la etiqueta `v<versión>` y empújala.
-
-El workflow falla con un mensaje claro si falta el HTML, si este referencia
-recursos externos, o si el icono no quedó dentro del paquete.
-
----
-
-## Icono
-
-`build/icon.ico` (16–256 px) se usa de dos formas:
-- electron-builder lo **incrusta** en el `.exe` y en el instalador (`win.icon`).
-- Se copia a `resources/icon.ico` mediante `extraResources` para que la
-  **ventana** lo use en tiempo de ejecución. Esto es necesario porque
-  electron-builder no empaqueta la carpeta `build/` (`buildResources`).
-
-Si Windows sigue mostrando un icono viejo tras actualizar, es la caché de
-iconos del Explorador, no la app.
+Para subir a una versión futura del simulador, **reemplaza
+`app/BioSim_v6_8.html`** por el HTML nuevo (ajustando la ruta en
+`src/main.js` si cambia el nombre) y sube la versión en `package.json`.
+El resto del andamiaje no cambia.
 
 ---
 
 ## Notas
 
-- **Guardado de archivos** (.bio, CSV, PNG): BioSim detecta `file://` y usa su
-  descarga de respaldo; Electron muestra el diálogo nativo "Guardar como".
-- **Informe PDF**: usa ventana emergente + impresión; `main.js` la permite.
-- **Sin red**: la app es 100% offline. `main.js` bloquea cualquier navegación
-  fuera del archivo local.
-- **WebGL**: `main.js` activa `ignore-gpu-blocklist` y SwiftShader como respaldo
-  para equipos sin GPU compatible. *Ayuda → Diagnóstico* muestra el estado.
+- **Guardado de archivos** (.bio, CSV, PNG, informe PDF): BioSim detecta que
+  corre sobre `file://` y usa su descarga de respaldo; Electron muestra el
+  diálogo nativo **"Guardar como"**. Funciona sin configuración extra.
+- **Informe PDF**: usa una ventana emergente + impresión; `main.js` ya la
+  permite y abre el diálogo de impresión de Chromium.
+- **Sin telemetría ni red**: la app es 100% offline (zero-CDN). `main.js`
+  bloquea cualquier navegación fuera del archivo local por seguridad.
+- **Lectura de EPW/OBJ/.bio**: el selector de archivos nativo funciona igual
+  que en el navegador.
 
 ---
 
-## Firma de código (opcional)
+## Firma de código (opcional, más adelante)
 
-El `.exe` sin firmar muestra el aviso SmartScreen la primera vez. Para evitarlo
-hace falta un certificado Authenticode (`win.signtoolOptions` o Azure Trusted
-Signing en electron-builder). No es necesario para uso interno/académico.
+El `.exe` sin firmar mostrará el aviso "SmartScreen" de Windows la primera
+vez. Para evitarlo se necesita un certificado de firma de código (Authenticode);
+electron-builder lo soporta vía `win.signtoolOptions` o Azure Trusted Signing.
+No es necesario para uso interno/académico.
