@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v7.2</title>
+<title>BioSim v10.0</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4126,7 +4126,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v7.2</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v10.0</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5585,7 +5585,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v7.0 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v10.0 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -22943,14 +22943,29 @@ function generarInforme(){
     // legacy fallback
     gainWindows:0,gainSolarDir:0,lossWindows:0
   };
-  eB.forEach(z=>Object.keys(tot).forEach(k=>tot[k]+=z[k]||0));
+  // v10.0: el total agregado —y con él la gráfica de torta, las partidas de
+  // componentes y las ganancias solares— solo suma las zonas seleccionadas
+  // para el análisis. Antes fundía siempre las seis, de modo que filtrar por
+  // zona cambiaba las tablas por zona pero dejaba intactos los apartados
+  // generales, con el resultado incoherente de un informe de una alcoba que
+  // mostraba la torta de la vivienda completa.
+  eB.forEach((z,i)=>{ if(!_zonaEnInforme(i)) return;
+                      Object.keys(tot).forEach(k=>tot[k]+=z[k]||0); });
+
+  // Conjunto de zonas incluidas, para acotar también los recuentos de
+  // superficies de envolvente que se calculan más abajo.
+  const _idsInforme = new Set(
+    zones.filter(z=>z.thermal).filter((z,i)=>_zonaEnInforme(i)).map(z=>z.id));
+  const enInforme = s => _idsInforme.size === 0 || _idsInforme.has(s.zoneId);
+  const _zonasIncluidas = zones.filter(z=>z.thermal).filter((z,i)=>_zonaEnInforme(i));
 
   // Convert Wh → kWh
   const kwh=v=>(v/1000).toFixed(2).replace('.',',');
 
   // ── Surface composition summary (diagnostic) ───────────────────────
   // Exclude adiabatic surfaces from all envelope counts and areas
-  const notAdiab = s => (s.tag||autoTag(s)) !== 'adiabática';
+  // v10.0: además de excluir adiabáticas, restringir a las zonas del informe
+  const notAdiab = s => (s.tag||autoTag(s)) !== 'adiabática' && enInforme(s);
   const extWallCount  = surfaces.filter(s=>s.exterior&&notAdiab(s)&&(s.tag||autoTag(s))==='muro').length;
   const extRoofCount  = surfaces.filter(s=>s.exterior&&notAdiab(s)&&(s.tag||autoTag(s))==='cubierta').length;
   const extGlazCount  = surfaces.filter(s=>s.exterior&&notAdiab(s)&&(s.tag||autoTag(s))==='ventana').length;
@@ -23198,14 +23213,25 @@ function generarInforme(){
     <div style="text-align:center;padding:10px 0 6px;border-bottom:2px solid #c8d0e0;margin-bottom:10px">
       <div style="font-size:.9rem;font-weight:700;color:#223;letter-spacing:.08em">INFORME DE BALANCE ENERGÉTICO</div>
       <div style="font-size:.62rem;color:#6070a0;margin-top:2px">
-        CIBSE Admittance Method · Guide A (2015) · ${zones.filter(z=>z.thermal).length} zona(s) T · ${surfaces.length} sup · 8760 h
+        CIBSE Admittance Method · Guide A (2015) · ${_zonasIncluidas.length} de ${zones.filter(z=>z.thermal).length} zona(s) T · 8760 h
         <div style="margin-top:4px;font-size:.55rem;color:#8090b0">
           Envolvente exterior: ${extWallCount} muros (${extWallArea.toFixed(1)} m²) ·
           ${extRoofCount} cubiertas (${extRoofArea.toFixed(1)} m²) ·
           ${extGlazCount} ventanas (${extGlazArea.toFixed(1)} m²) ·
           ${adiabCount>0?adiabCount+' adiabáticas (excluidas del balance) · ':''}
-          ${(()=>{ const sc=surfaces.filter(s=>s.partition==='shared'&&s.neighborZoneId).length; const sa=surfaces.filter(s=>s.partition==='shared'&&s.neighborZoneId).reduce((a,s)=>a+s.area,0); return sc>0?`<span style="color:#a06ed6">↔ ${sc} compartidas interzonales (${sa.toFixed(1)} m² · acopladas térmicamente) · </span>`:''; })()}
-          Vol. total: ${zones.filter(z=>z.thermal).reduce((a,z)=>a+(z.volume||0),0).toFixed(1)} m³
+          ${(()=>{ const comp=surfaces.filter(s=>s.partition==='shared'&&s.neighborZoneId&&enInforme(s)); const sa=comp.reduce((a,s)=>a+s.area,0); return comp.length>0?`<span style="color:#a06ed6">↔ ${comp.length} compartidas interzonales (${sa.toFixed(1)} m² · acopladas térmicamente) · </span>`:''; })()}
+          Vol.: ${_zonasIncluidas.reduce((a,z)=>a+(z.volume||0),0).toFixed(1)} m³
+        </div>
+        <!-- v10.0: alcance explícito. Sin esto, un informe de una sola zona
+             sería indistinguible del de la vivienda completa. -->
+        <div style="margin-top:6px;padding:4px 10px;border-radius:4px;display:inline-block;
+             background:${_zonaFiltro?'#fff4e0':'#eef4ff'};border:1px solid ${_zonaFiltro?'#e0b870':'#c0d0e8'};
+             font-size:.58rem;color:#405070">
+          ${_zonaFiltro
+            ? `⚠ Informe restringido a <b>${_zonasIncluidas.map(z=>z.name).join(', ')}</b>.
+               Todos los apartados —balance, componentes, ganancias solares y gráfica de reparto—
+               se refieren solo a ${_zonasIncluidas.length===1?'esta zona':'estas zonas'}.`
+            : `Informe del edificio completo: <b>${_zonasIncluidas.map(z=>z.name).join(', ')}</b>.`}
         </div>
       </div>
     </div>
@@ -24708,7 +24734,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v7.2
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v10.0
   </div>
 </div>
 <script>
@@ -26179,7 +26205,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v7.2</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v10.0</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
