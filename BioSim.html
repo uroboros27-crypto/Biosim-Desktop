@@ -4844,6 +4844,7 @@ canvas#cv{display:block;}
       <div class="bbody act" id="bChart">
         <div class="chart-scroll-wrap">
         <div style="display:flex;justify-content:flex-end;padding:3px 6px;border-bottom:1px solid var(--border);flex-shrink:0">
+          <button class="btn btn-g btn-xs zf-btn" onclick="abrirFiltroZonas()" title="Elegir qué zonas térmicas aparecen en los informes">🔍 Zonas</button>
           <button class="btn btn-g btn-xs" onclick="exportTabPDF('bChart','Temperatura del Aire Interior')">⬇ PDF</button>
         </div>
         <div style="font-size:.6rem;color:var(--text3);padding:4px 6px;margin-bottom:2px;line-height:1.5;border-bottom:1px dashed var(--border)">
@@ -4900,13 +4901,15 @@ canvas#cv{display:block;}
               style="font-size:.6rem;width:42px;padding:1px 3px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">
             <button class="btn btn-g btn-xs ppf-per" id="ppfPerDay" onclick="setPPFDayMode(this)" title="Graficar perfil horario de UN día específico">Día</button>
             <div class="tb-sep"></div>
-            <button class="btn btn-g btn-xs" onclick="exportTabPDF('bPerfil','Perfil Horario de Temperatura')">⬇ PDF</button>
+            <button class="btn btn-g btn-xs zf-btn" onclick="abrirFiltroZonas()" title="Elegir qué zonas térmicas aparecen en los informes">🔍 Zonas</button>
+          <button class="btn btn-g btn-xs" onclick="exportTabPDF('bPerfil','Perfil Horario de Temperatura')">⬇ PDF</button>
           </div>
         </div>
         <div class="chart-w"><canvas id="cPerfil"></canvas></div>
         </div>
       </div>
       <div class="bbody" id="bConf">        <div style="display:flex;justify-content:flex-end;padding:3px 6px;border-bottom:1px solid var(--border);flex-shrink:0">
+          <button class="btn btn-g btn-xs zf-btn" onclick="abrirFiltroZonas()" title="Elegir qué zonas térmicas aparecen en los informes">🔍 Zonas</button>
           <button class="btn btn-g btn-xs" onclick="exportTabPDF('bConf','Análisis de Confort Térmico')">⬇ PDF</button>
         </div>
         <div style="font-size:.6rem;color:var(--text3);font-family:var(--font-mono);padding:2px 4px;margin-bottom:2px">
@@ -4914,9 +4917,14 @@ canvas#cv{display:block;}
           <span id="confScopeLbl" style="color:var(--accent)"></span>
         </div>
         <div class="chart-w"><canvas id="cConf"></canvas></div>
+        <!-- v9.5: una gráfica por zona térmica. Con seis zonas, la gráfica
+             conjunta superpone 12 series de barras y es imposible saber a qué
+             zona corresponde cada una. -->
+        <div id="confZoneCharts"></div>
       </div>
       <div class="bbody" id="bStat">
         <div style="display:flex;justify-content:flex-end;padding:3px 6px;border-bottom:1px solid var(--border);flex-shrink:0">
+          <button class="btn btn-g btn-xs zf-btn" onclick="abrirFiltroZonas()" title="Elegir qué zonas térmicas aparecen en los informes">🔍 Zonas</button>
           <button class="btn btn-g btn-xs" onclick="exportTabPDF('bStat','Estadísticas de Simulación')">⬇ PDF</button>
         </div>
         <div id="statHtml" style="overflow-y:auto;flex:1"></div>
@@ -4924,6 +4932,7 @@ canvas#cv{display:block;}
       <div class="bbody" id="bReport">
         <div style="display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border);flex-shrink:0">
           <button class="btn btn-a btn-xs" onclick="generarInforme()">🔄 Regenerar</button>
+          <button class="btn btn-g btn-xs zf-btn" onclick="abrirFiltroZonas()" title="Elegir qué zonas térmicas aparecen en los informes">🔍 Zonas</button>
           <button class="btn btn-g btn-xs" onclick="exportarInformePDF()">⬇ Exportar PDF</button>
           <button class="btn btn-g btn-xs" onclick="exportarInformeCSV()">⬇ CSV Balance</button>
         </div>
@@ -19759,6 +19768,7 @@ function _renderSeasonHourlyChart(){
      borderWidth:1.8, borderDash:[3,3], pointRadius:0, tension:0.4, order:7}
   ];
   snap.zoneNames.forEach((zn, zi) => {
+    if(!_zonaEnInforme(zi)) return;               // v9.4: filtro de zonas
     const c = snap.zoneColors[zi];
     datasets.push({label:'Ta '+zn, data:hourlyTa[zi], borderColor:c,
       borderWidth:1.8, borderDash:[4,3], pointRadius:0, tension:0.4, order:5});
@@ -19896,6 +19906,7 @@ function _renderSeasonChart(){
      borderWidth:1.5, borderDash:[3,3], pointRadius:0, tension:0.3, order:7}
   ];
   snap.zoneNames.forEach((zn, zi) => {
+    if(!_zonaEnInforme(zi)) return;               // v9.4: filtro de zonas
     const c = snap.zoneColors[zi];
     datasets.push({label:'Ta '+zn, data:dailyTa[zi], borderColor:c,
       borderWidth:1.6, borderDash:[4,3], pointRadius:0, tension:0.3, order:5});
@@ -20152,6 +20163,7 @@ function graficarA(){
        pointRadius:0, fill:false, tension:0.3, order:8},
       // Zone temperatures
       ...daily.map((d,i)=>{
+        if(!_zonaEnInforme(i)) return null;       // v9.4: filtro de zonas
         const tz=zones.filter(z=>z.thermal)[i];
         // Compute mean ΔT vs exterior for label
         const validD = d.filter((v,j)=>v!==null&&extD[j]!==null);
@@ -20171,10 +20183,11 @@ function graficarA(){
           tension:0.3,
           order:i+1
         };
-      }),
+      }).filter(d=>d!==null),
       // ── MRT por zona — línea CONTINUA en el color de la zona ──────────
       ...dailyMRT.map((d,i)=>{
         if(!d) return null;
+        if(!_zonaEnInforme(i)) return null;      // v9.4: filtro de zonas
         const tz=zones.filter(z=>z.thermal)[i];
         // Etiqueta con MRT media anual
         const valid = d.filter(v=>v!==null && isFinite(v));
@@ -20676,8 +20689,95 @@ function ashrae55Limits(monthIdx){
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  GRÁFICAS DE CONFORT POR ZONA (v9.5)
+//
+//  La gráfica conjunta apila dos series de barras por zona —80% y 90%— de
+//  modo que con seis zonas son doce series del mismo ancho, y no hay forma
+//  de saber a qué recinto pertenece cada barra.
+//
+//  Ahora, además de la conjunta, se dibuja una gráfica por zona: barras
+//  apiladas de frío / confort / calor que suman 100% cada mes, con el color
+//  de la zona en el título y su porcentaje anual. Cada una se lee sola.
+// ═══════════════════════════════════════════════════════════════════════
+let _chartsZona = [];
+
+function _destruirChartsZona(){
+  _chartsZona.forEach(c => { try{ c.destroy(); }catch(e){} });
+  _chartsZona = [];
+}
+
+function _graficarConfortPorZona(limitsPerMonth, dias, meses, PAL){
+  _destruirChartsZona();
+  const cont = document.getElementById('confZoneCharts');
+  if(!cont) return;
+  cont.innerHTML = '';
+  const tz = zones.filter(z => z.thermal);
+  const visibles = results.map((_,zi)=>zi).filter(zi => zi < tz.length && _zonaEnInforme(zi));
+  if(visibles.length === 0) return;
+
+  visibles.forEach(zi => {
+    const z = tz[zi], arr = results[zi];
+    const mask = buildOccMask(z);
+    const frio=[], ok=[], calor=[];
+    let h=0, nTot=0, nOk=0;
+    dias.forEach((d, mi)=>{
+      const L = limitsPerMonth[mi];
+      let a=0,b=0,c=0;
+      for(let k=0;k<d*24;k++,h++){
+        if(mask && !mask[h]) continue;
+        const t = arr[h];
+        if(t===undefined) continue;
+        if(t < L.min80) a++; else if(t > L.max80) c++; else b++;
+      }
+      const tot = a+b+c || 1;
+      frio.push(a/tot*100); ok.push(b/tot*100); calor.push(c/tot*100);
+      nTot += a+b+c; nOk += b;
+    });
+    const pctAnual = nTot ? (nOk/nTot*100) : 0;
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-top:14px';
+    wrap.innerHTML = `
+      <div style="display:flex;align-items:baseline;gap:8px;font-size:.68rem;margin-bottom:3px;padding:0 4px">
+        <span style="width:11px;height:11px;border-radius:2px;background:${z.color};display:inline-block"></span>
+        <b style="color:var(--text)">${z.name}</b>
+        <span style="color:var(--text3);font-size:.6rem">
+          ${pctAnual.toFixed(1)}% dentro de la banda del 80% ·
+          ${nTot} h ${mask?'ocupadas':'(sin horario de ocupación)'}</span>
+      </div>
+      <div class="chart-w" style="height:170px"><canvas></canvas></div>`;
+    cont.appendChild(wrap);
+
+    const cv = wrap.querySelector('canvas');
+    _chartsZona.push(new Chart(cv, {
+      type:'bar',
+      data:{ labels: meses, datasets:[
+        {label:'Frío',    data:frio,  backgroundColor:PAL.cold.bar,    borderColor:PAL.cold.border,    borderWidth:1, stack:'s'},
+        {label:'Confort', data:ok,    backgroundColor:PAL.comfort.bar, borderColor:PAL.comfort.border, borderWidth:1, stack:'s'},
+        {label:'Calor',   data:calor, backgroundColor:PAL.hot.bar,     borderColor:PAL.hot.border,     borderWidth:1, stack:'s'}
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false,
+        plugins:{
+          legend:{display:false},
+          tooltip:{callbacks:{label: it => `${it.dataset.label}: ${it.parsed.y.toFixed(1)}%`}}
+        },
+        scales:{
+          x:{stacked:true, grid:{display:false},
+             ticks:{color:'#7a8aa8', font:{size:8, family:'JetBrains Mono'}}},
+          y:{stacked:true, min:0, max:100,
+             grid:{color:'rgba(120,140,180,.12)'},
+             ticks:{color:'#7a8aa8', font:{size:8, family:'JetBrains Mono'},
+                    callback:v=>v+'%', stepSize:25}}
+        }
+      }
+    }));
+  });
+}
+
 function graficarC(){
   if(chartC) chartC.destroy();
+  _destruirChartsZona();
   if(!results || results.length===0 || !results[0] || results[0].length<1){
     document.getElementById('cConf').parentElement.innerHTML=
       '<div style="padding:20px;text-align:center;color:#7a90b8;font-size:.72rem">Ejecuta la simulación primero para ver el análisis de confort.</div>';
@@ -20730,6 +20830,7 @@ function graficarC(){
 
   const datasets = results.map((zone,zi)=>{
     if(zi>=thermalZones.length) return [];
+    if(!_zonaEnInforme(zi)) return [];           // v9.4: filtro de zonas
     const pct80=[], pct90=[];
     const pBelow=[], pAbove=[];
     const occMask=getOccMask(zi);
@@ -20818,6 +20919,9 @@ function graficarC(){
 
   // ── Comfort table and conclusions: use FIRST thermal zone ─────────
   // (multi-zone: each zone gets its own table — future enhancement)
+  // v9.5: una gráfica independiente por zona, debajo de la conjunta
+  _graficarConfortPorZona(limitsPerMonth, dias, meses, COMFORT_PALETTE);
+
   const parent=document.getElementById('cConf').parentElement;
 
   // Use first thermal zone (results[0] ↔ thermalZones[0])
@@ -21228,8 +21332,9 @@ function mostrarStats(){
   const limMo=dias.map((_,mi)=>ashrae55Limits(mi));
 
   // Only consider results with a matching thermal zone
-  const validPairs = results.map((arr,i)=>({arr, zone: thermalZones[i]}))
-                            .filter(p=>p.zone && p.arr && p.arr.length>=100);
+  const validPairs = results.map((arr,i)=>({arr, zone: thermalZones[i], zi:i}))
+                            .filter(p=>p.zone && p.arr && p.arr.length>=100)
+                            .filter(p=>_zonaEnInforme(p.zi));   // v9.4: filtro de zonas
 
   if(validPairs.length===0){
     document.getElementById('statHtml').innerHTML='<p style="color:#e05050;padding:10px;font-size:.72rem">Sin datos de temperatura interior válidos.</p>';
@@ -22557,6 +22662,125 @@ function _zonaPartidas(z){
 // Tabla de balance desglosada por zona térmica, para el informe.
 // Resumen de confort de UNA zona, sobre sus propias horas ocupadas.
 // results[zi] ↔ thermalZones[zi]; nunca zones[zi].
+// ═══════════════════════════════════════════════════════════════════════
+//  FILTRO DE ZONAS PARA LOS INFORMES (v9.4)
+//
+//  Con seis zonas, la gráfica anual superpone doce series —Ta y MRT de cada
+//  una— más la banda de confort y el rango exterior. El resultado es
+//  ilegible: ninguna curva se puede seguir.
+//
+//  Este filtro permite restringir TODOS los informes a las zonas que
+//  interesen. Es un filtro de presentación: no altera la simulación, que
+//  siempre resuelve el edificio completo con sus acoplamientos interzonales.
+//  Con todas las zonas marcadas los informes quedan exactamente como ahora.
+// ═══════════════════════════════════════════════════════════════════════
+let _zonaFiltro = null;    // null = todas · Set de ids de zona en caso contrario
+
+// Las zonas térmicas en el MISMO orden que results[] y mrtResults[].
+function _zonasTermicas(){ return zones.filter(z => z.thermal); }
+
+// ¿Debe mostrarse la zona térmica de índice zi?
+function _zonaEnInforme(zi){
+  if(!_zonaFiltro) return true;
+  const z = _zonasTermicas()[zi];
+  return !!(z && _zonaFiltro.has(z.id));
+}
+
+function _nZonasFiltradas(){
+  return _zonaFiltro ? _zonasTermicas().filter(z=>_zonaFiltro.has(z.id)).length
+                     : _zonasTermicas().length;
+}
+
+// Etiqueta del alcance activo, para rotular informes y nombres de archivo.
+function _alcanceInforme(){
+  const tz = _zonasTermicas();
+  if(!_zonaFiltro || _zonaFiltro.size >= tz.length) return 'todas las zonas';
+  const n = tz.filter(z=>_zonaFiltro.has(z.id));
+  if(n.length === 1) return n[0].name;
+  return `${n.length} de ${tz.length} zonas: ` + n.map(z=>z.name).join(', ');
+}
+
+// Repinta todo lo que depende del filtro.
+function _refrescarInformes(){
+  try{ if(typeof graficarA === "function") graficarA(); }catch(e){}
+  try{ if(typeof graficarPerfil === 'function') graficarPerfil(); }catch(e){}
+  try{ if(typeof graficarC === 'function') graficarC(); }catch(e){}
+  try{ if(typeof mostrarStats === 'function') mostrarStats(); }catch(e){}
+  try{ if(typeof generarInforme === 'function' &&
+          document.getElementById('reportHtml')?.innerHTML.trim()) generarInforme(); }catch(e){}
+}
+
+// ── Diálogo de selección ───────────────────────────────────────────────
+function abrirFiltroZonas(){
+  const tz = _zonasTermicas();
+  if(tz.length === 0){ log('No hay zonas térmicas en el modelo.','warn'); return; }
+  if(!results || results.length === 0){ log('Ejecuta la simulación antes de filtrar los informes.','warn'); return; }
+  document.getElementById('zonaFiltroModal')?.remove();
+
+  const filas = tz.map((z,i)=>{
+    const marcada = !_zonaFiltro || _zonaFiltro.has(z.id);
+    const hay = i < results.length;
+    return `
+    <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;cursor:${hay?'pointer':'not-allowed'};font-size:.74rem;color:var(--text2);opacity:${hay?1:.45}"
+      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='none'">
+      <input type="checkbox" class="zf-chk" value="${z.id}" ${marcada&&hay?'checked':''} ${hay?'':'disabled'} style="cursor:inherit">
+      <span style="width:10px;height:10px;border-radius:2px;background:${z.color};flex-shrink:0"></span>
+      <span style="flex:1">${z.name}</span>
+      <span style="font-family:var(--font-mono);font-size:.62rem;color:var(--text3)">${(z.volume||0).toFixed(1)} m³</span>
+    </label>`;
+  }).join('');
+
+  document.body.insertAdjacentHTML('beforeend', `
+  <div id="zonaFiltroModal" style="position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.55);
+       display:flex;align-items:center;justify-content:center;padding:20px"
+       onclick="if(event.target===this)this.remove()">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+         width:min(400px,94vw);box-shadow:0 20px 50px rgba(0,0,0,.6);padding:18px 20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-weight:700;font-size:.86rem;color:var(--text)">Zonas en los informes</span>
+        <button style="background:none;border:none;font-size:1.25rem;color:var(--text3);cursor:pointer;line-height:1;padding:0 4px"
+          onclick="document.getElementById('zonaFiltroModal').remove()">✕</button>
+      </div>
+      <div style="font-size:.68rem;color:var(--text2);line-height:1.6;margin-bottom:10px">
+        Restringe gráficas y tablas a las zonas marcadas. Es un filtro de
+        <b>presentación</b>: la simulación siempre resuelve el edificio completo
+        con sus intercambios interzonales.
+      </div>
+      <div style="border:1px solid var(--border);border-radius:5px;padding:3px;margin-bottom:9px;max-height:260px;overflow-y:auto">
+        ${filas}
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:12px">
+        <button class="btn btn-g btn-xs" onclick="document.querySelectorAll('.zf-chk:not(:disabled)').forEach(c=>c.checked=true)">Todas</button>
+        <button class="btn btn-g btn-xs" onclick="document.querySelectorAll('.zf-chk:not(:disabled)').forEach(c=>c.checked=false)">Ninguna</button>
+      </div>
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button class="btn btn-g btn-sm" onclick="document.getElementById('zonaFiltroModal').remove()">Cancelar</button>
+        <button class="btn btn-a btn-sm" onclick="aplicarFiltroZonas()">Aplicar</button>
+      </div>
+    </div>
+  </div>`);
+}
+
+function aplicarFiltroZonas(){
+  const marcadas = [...document.querySelectorAll('.zf-chk')].filter(c=>c.checked).map(c=>c.value);
+  if(marcadas.length === 0){ log('Marca al menos una zona.','warn'); return; }
+  const tz = _zonasTermicas();
+  _zonaFiltro = (marcadas.length >= tz.length) ? null : new Set(marcadas);
+  document.getElementById('zonaFiltroModal')?.remove();
+  _refrescarInformes();
+  _actualizarBotonFiltro();
+  log(`Informes mostrando: ${_alcanceInforme()}.`, 'ok');
+}
+
+function _actualizarBotonFiltro(){
+  const n = _nZonasFiltradas(), tot = _zonasTermicas().length;
+  document.querySelectorAll('.zf-btn').forEach(b=>{
+    b.textContent = _zonaFiltro ? `🔍 ${n}/${tot} zonas` : '🔍 Zonas';
+    b.style.color = _zonaFiltro ? 'var(--accent)' : '';
+    b.title = 'Informes mostrando: ' + _alcanceInforme() + '. Pulsa para cambiar.';
+  });
+}
+
 function _confortDeZona(zi, limitsPerMonth, diasMes){
   // thermalZones es local a simular(); aquí se reconstruye desde el estado
   // global con el MISMO criterio, para que results[zi] siga correspondiendo
@@ -22592,7 +22816,8 @@ function _confortDeZona(zi, limitsPerMonth, diasMes){
 // Tabla comparativa de confort por zona térmica.
 function _confortPorZona(limitsPerMonth, diasMes){
   if(!results || results.length === 0) return '';
-  const filas = results.map((_, zi)=>_confortDeZona(zi, limitsPerMonth, diasMes)).filter(Boolean);
+  const filas = results.map((_, zi)=>_zonaEnInforme(zi) ? _confortDeZona(zi, limitsPerMonth, diasMes) : null)
+                       .filter(Boolean);
   if(filas.length === 0) return '';
   const col = p => p>=70?'#2e8b4a' : p>=50?'#b8860b' : '#c0392b';
   const cuerpo = filas.map(f=>`
@@ -22648,6 +22873,7 @@ function _confortPorZona(limitsPerMonth, diasMes){
 function _informePorZona(eB, eZ, kwh){
   if(!eB || !eZ || eB.length < 1) return '';
   const filas = eB.map((zb, i) => {
+    if(!_zonaEnInforme(i)) return '';             // v9.4: filtro de zonas
     const z = zones.find(x => x.id === eZ[i]);
     const nombre = z ? z.name : (eZ[i] || `Zona ${i+1}`);
     const {g, p} = _zonaPartidas(zb);
@@ -24207,6 +24433,12 @@ function exportTabPDF(tabId, title){
   // Capture the Chart.js canvas as an image first if in bChart/bConf/bRad
   const el = document.getElementById(tabId);
   if(!el){ log('No hay datos para exportar.','warn'); return; }
+
+  // v9.4: si hay filtro de zonas activo, el título del PDF lo declara. Sin
+  // esto, un informe de dos zonas sería indistinguible de uno completo.
+  if(typeof _zonaFiltro !== 'undefined' && _zonaFiltro && typeof _alcanceInforme === 'function'){
+    title = title + ' — ' + _alcanceInforme();
+  }
 
   // v2.9: Generar SVG vectorial de cada Chart.js detectado.
   // Garantiza que todo el texto (títulos, ejes, leyenda, datos) sea
