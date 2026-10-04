@@ -9747,25 +9747,57 @@ function importOBJ(text, fname, opts){
     curTris=[];
   }
 
+  // ══ v9.1 · PRE-PASADA ═════════════════════════════════════════════════
+  // SketchUp escribe el archivo en este orden:
+  //      g Mesh1 Model
+  //      …las 92 caras «f»…
+  //      g Mesh2 Model
+  //      …las 98 aristas «l»…
+  //
+  // Un cambio de grupo «g» cierra la sopa de triángulos pendiente y la
+  // descompone en el acto. Con el orden de arriba, esa descomposición ocurría
+  // ANTES de haber leído una sola arista: hardEdges estaba vacío y el corte
+  // por aristas reales no se aplicaba nunca. Por eso en el modelo unas
+  // divisiones se detectaban (las que tienen quiebre angular, o las caras
+  // exportadas como polígono) y otras no (fachadas coplanares trianguladas
+  // por llevar ventana), que es justo lo que se veía en pantalla.
+  //
+  // La corrección: recorrer el archivo una primera vez recogiendo SOLO los
+  // vértices y las aristas, de modo que al procesar las caras el conjunto de
+  // aristas duras ya esté completo, aparezcan donde aparezcan en el archivo.
+  const _lPairs = [];
+  text.split('\n').forEach(raw=>{
+    const t = raw.trim();
+    if(!t) return;
+    const c = t.charCodeAt(0);
+    if(c === 118 && t[1] === ' '){                       // 'v '
+      const p = t.split(/\s+/);
+      verts.push(+p[1]||0, +p[2]||0, +p[3]||0);
+    } else if(c === 108 && t[1] === ' '){                 // 'l '
+      const p = t.split(/\s+/);
+      const idx = [];
+      for(let i=1;i<p.length;i++){
+        const v = parseInt(p[i].split('/')[0]);
+        if(Number.isFinite(v)) idx.push(v);
+      }
+      for(let k=0;k+1<idx.length;k++) _lPairs.push(idx[k], idx[k+1]);
+    }
+  });
+  const _nv = verts.length/3;
+  for(let i=0;i+1<_lPairs.length;i+=2){
+    const a = _lPairs[i]   > 0 ? _lPairs[i]-1   : _nv + _lPairs[i];
+    const b = _lPairs[i+1] > 0 ? _lPairs[i+1]-1 : _nv + _lPairs[i+1];
+    if(a<0||b<0||a>=_nv||b>=_nv) continue;
+    hardEdges.push(verts[a*3], verts[a*3+1], verts[a*3+2],
+                   verts[b*3], verts[b*3+1], verts[b*3+2]);
+  }
+  const _vertsYaLeidos = verts.length;   // la pasada principal no los repite
+
   text.split('\n').forEach(raw=>{
     const line=raw.trim(); if(!line||line[0]==='#') return;
     const p=line.split(/\s+/);
-    if(p[0]==='v') verts.push(+p[1]||0, +p[2]||0, +p[3]||0);
-    // v8.2: «l» = aristas reales dibujadas en el modelo de origen. Son la
-    // única forma de recuperar la separación entre caras coplanares cuando
-    // la cara venía triangulada (p. ej. cualquier fachada con ventanas, que
-    // OBJ obliga a triangular porque no admite polígonos con agujeros).
-    else if(p[0]==='l'){
-      const li = p.slice(1).map(t=>{
-        const v = parseInt(t.split('/')[0]);
-        return v > 0 ? v - 1 : verts.length/3 + v;
-      }).filter(i => Number.isFinite(i) && i >= 0);
-      for(let k=0; k+1 < li.length; k++){
-        const a = li[k], b = li[k+1];
-        hardEdges.push(verts[a*3]||0, verts[a*3+1]||0, verts[a*3+2]||0,
-                       verts[b*3]||0, verts[b*3+1]||0, verts[b*3+2]||0);
-      }
-    }
+    // v9.1: vértices y aristas ya se leyeron en la pre-pasada; aquí se ignoran.
+    if(p[0]==='v' || p[0]==='l') return;
     else if(p[0]==='g'||p[0]==='o'){
       flushTris();                              // cerrar la sopa del grupo actual
       curName=p.slice(1).join('_')||'Mesh';
