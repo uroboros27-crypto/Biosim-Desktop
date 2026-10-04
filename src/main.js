@@ -4,11 +4,16 @@
 //  Electron empaqueta su propio Chromium, así que NO depende de WebView2
 //  ni de ningún runtime preinstalado: corre en cualquier Windows 10+ x64.
 //
-//  v8.0.1
-//   - Icono de ventana: build/icon.ico viaja como extraResource a
-//     resources/icon.ico (electron-builder NO empaqueta buildResources).
-//   - Ruta del HTML fija: BioSim.html (es lo único que empaqueta package.json).
-//   - El título de la ventana lo controla package.json, no el <title> del HTML.
+//  v7.2.1 — CAMBIOS FRENTE A LA VERSIÓN ANTERIOR
+//   1. La ruta del HTML ya NO está escrita a mano. Se descubre en tiempo
+//      de ejecución cualquier archivo «BioSim*.html» de la raíz. Así,
+//      renombrar o subir una versión nueva del simulador nunca vuelve a
+//      romper el ejecutable.
+//   2. Si no se encuentra ningún HTML, se muestra un diálogo explícito en
+//      vez de una ventana en blanco.
+//   3. Se añaden los switches de GPU: sin ellos, Chromium moderno se niega
+//      a crear contexto WebGL en equipos sin GPU compatible y BioSim se
+//      queda sin visor 3D ni geometría.
 // ════════════════════════════════════════════════════════════════════
 'use strict';
 
@@ -16,14 +21,17 @@ const { app, BrowserWindow, Menu, shell, dialog, nativeImage } = require('electr
 const path = require('path');
 const fs = require('fs');
 
-// Icono de la ventana. electron-builder incrusta build/icon.ico en el .exe,
-// pero la VENTANA necesita la ruta del archivo en tiempo de ejecución:
-//  - empaquetado: resources/icon.ico (copiado por "extraResources")
-//  - desarrollo (npm start): build/icon.ico
+// v8.0 — Icono de la ventana. electron-builder incrusta build/icon.ico en el
+// .exe y lo usa en el instalador, pero la VENTANA usa este otro: sin él,
+// Windows muestra el icono por defecto de Electron en la barra de tareas
+// durante la ejecución. Se busca junto al código y en resources/ para que
+// funcione tanto en desarrollo como empaquetado.
 function findIcon(){
   const cands = [
-    path.join(process.resourcesPath || '', 'icon.ico'),
-    path.join(__dirname, '..', 'build', 'icon.ico')
+    path.join(__dirname, '..', 'build', 'icon.ico'),
+    path.join(__dirname, '..', 'build', 'icon.png'),
+    path.join(process.resourcesPath || '', 'build', 'icon.ico'),
+    path.join(process.resourcesPath || '', 'icon.ico')
   ];
   for(const c of cands){ try{ if(fs.existsSync(c)) return c; }catch(e){} }
   return null;
@@ -42,8 +50,20 @@ app.commandLine.appendSwitch('enable-unsafe-swiftshader');
 const ROOT = path.join(__dirname, '..');
 
 function findAppHtml() {
-  const p = path.join(ROOT, 'BioSim.html');
-  return fs.existsSync(p) ? p : null;
+  // 1) Nombre canónico, si existe.
+  const canonical = path.join(ROOT, 'BioSim.html');
+  if (fs.existsSync(canonical)) return canonical;
+
+  // 2) Cualquier BioSim*.html; si hay varios, el de nombre mayor
+  //    (BioSim_v7_2 gana a BioSim_v6_8) para no servir una versión vieja.
+  let files = [];
+  try {
+    files = fs.readdirSync(ROOT).filter(f => /^BioSim.*\.html$/i.test(f));
+  } catch (e) { /* directorio ilegible */ }
+
+  if (files.length === 0) return null;
+  files.sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
+  return path.join(ROOT, files[0]);
 }
 
 const APP_HTML = findAppHtml();
@@ -82,10 +102,6 @@ function createMainWindow() {
   });
 
   win.once('ready-to-show', () => win.show());
-
-  // El <title> del HTML reemplazaría el título de la ventana al cargar;
-  // se mantiene el de package.json para que la versión siempre coincida.
-  win.on('page-title-updated', e => e.preventDefault());
 
   // Si la carga del archivo falla, decirlo en vez de dejar la ventana muda.
   win.webContents.on('did-fail-load', (e, code, desc, url) => {
@@ -166,7 +182,6 @@ function buildMenu() {
               message: 'Estado del entorno',
               detail:
                 'HTML cargado:\n' + (APP_HTML || '(ninguno)') + '\n\n' +
-                'Icono:\n' + (ICON_PATH || '(no encontrado)') + '\n\n' +
                 'Electron ' + process.versions.electron +
                 ' · Chromium ' + process.versions.chrome + '\n\n' +
                 'WebGL: ' + (gpu.webgl || 'desconocido') + '\n' +
@@ -202,9 +217,10 @@ app.whenReady().then(() => {
   if (!APP_HTML) {
     dialog.showErrorBox(
       'BioSim — archivo de aplicación no encontrado',
-      'No se encontró BioSim.html.\n\n' +
+      'No se encontró ningún archivo «BioSim*.html» junto al ejecutable.\n\n' +
       'Buscado en:\n' + ROOT + '\n\n' +
-      'Revisa la lista "files" de package.json.'
+      'Revisa la lista "files" de package.json: debe incluir el HTML que ' +
+      'realmente está en el repositorio.'
     );
     app.quit();
     return;
