@@ -18462,58 +18462,16 @@ async function simular(){
     surfGeomCache.set(s.id, { tag, isGlaz, isFloor, isRoof, isSkylight, shgc, normal, ny, solarFactor });
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // FASE 3 · Pre-clasificación de SUPERFICIES COMPARTIDAS INTERZONALES
-  // ═══════════════════════════════════════════════════════════════════
-  // Una superficie compartida (s.partition==='shared') acopla dos zonas
-  // térmicas. En cada hora aportará coeficientes off-diagonales a la
-  // matriz H (acoplamiento térmico) — pero sólo si AMBAS zonas son
-  // térmicas (zone.thermal===true). Si una de las dos es shader o no
-  // existe, se degrada a adiabática para esa simulación.
+  // v9.2: la FASE 3 (superficies compartidas interzonales) se trasladó más
+  // abajo, justo después de declarar thermalZones y zIds. Aquí usaba ambas
+  // variables ANTES de su declaración `const`, lo que en JavaScript no da
+  // `undefined` sino un ReferenceError por zona muerta temporal, y abortaba
+  // simular() antes de que la barra de progreso avanzara de 0%.
   //
-  // Para construcciones asimétricas (aislamiento en un solo lado) el
-  // método CIBSE pide que cada zona vea su propia admitancia: la zona A
-  // (zoneId) ve las capas en su orden original; la zona B (neighborZoneId)
-  // las ve invertidas. Se calcula calcParams(layers) y calcParams(reverse).
-  //
-  // Cada entrada del cache contiene:
-  //   { surface, ziA, ziB, paramsA, paramsB, UA, valid }
-  // donde paramsA/paramsB son los resultados de calcParams() con el orden
-  // de capas que cada zona ve, y UA = U·area es común a ambas zonas
-  // (Three.js: U es la misma en ambos sentidos para un material lineal).
+  // Solo se manifestaba en modelos con particiones compartidas: sin ninguna,
+  // el bucle hace `return` en cada superficie antes de tocar esas variables.
+  // Por eso los modelos de una zona simulaban bien.
 
-  const sharedSurfCache = [];
-  surfaces.forEach(s=>{
-    if(s.partition !== 'shared') return;
-    if(!s.neighborZoneId) return;          // shared sin vecina → adiabática
-    if(s.zoneId === s.neighborZoneId) return; // patología, ya filtrado pero por seguridad
-    // v4.3: si el usuario etiquetó la superficie como adiabática, prevalece la
-    // etiqueta — no se acopla térmicamente entre zonas aunque sea 'shared'.
-    // Esto permite que una pared compartida se "anule" térmicamente sin
-    // cambiar su tipo de partición (útil para experimentos: ¿qué pasa si
-    // este muro no transmitiera calor?).
-    if((s.tag || autoTag(s)) === 'adiabática') return;
-    const ziA = zIds.indexOf(s.zoneId);
-    const ziB = zIds.indexOf(s.neighborZoneId);
-    // Ambas zonas deben ser térmicas (estar en zIds)
-    if(ziA < 0 || ziB < 0){
-      // Una de las zonas es shader o no existe → degradar a adiabática
-      return;
-    }
-    const layers = s.layers || [];
-    if(layers.length === 0) return;
-    const paramsA = calcParams(layers);
-    const paramsB = calcParams([...layers].reverse());
-    const UA = paramsA.U * s.area;
-    if(!isFinite(UA) || UA <= 0) return;
-    sharedSurfCache.push({
-      id: s.id, surface: s, ziA, ziB,
-      paramsA, paramsB, UA, area: s.area
-    });
-  });
-  if(sharedSurfCache.length>0){
-    log(`Fase 3: ${sharedSurfCache.length} superficie(s) compartida(s) acopladas térmicamente.`,'ok');
-  }
 
   // ── Zone thermal capacitance C [J/K] ──────────────────────────────
   // CIBSE Guide A 2015 §5.3: In the admittance method the dynamic thermal
@@ -18567,6 +18525,59 @@ async function simular(){
     return;
   }
   const zIds=thermalZones.map(z=>z.id), N=zIds.length;
+
+  // ═══════════════════════════════════════════════════════════════════
+  // FASE 3 · Pre-clasificación de SUPERFICIES COMPARTIDAS INTERZONALES
+  // ═══════════════════════════════════════════════════════════════════
+  // Una superficie compartida (s.partition==='shared') acopla dos zonas
+  // térmicas. En cada hora aportará coeficientes off-diagonales a la
+  // matriz H (acoplamiento térmico) — pero sólo si AMBAS zonas son
+  // térmicas (zone.thermal===true). Si una de las dos es shader o no
+  // existe, se degrada a adiabática para esa simulación.
+  //
+  // Para construcciones asimétricas (aislamiento en un solo lado) el
+  // método CIBSE pide que cada zona vea su propia admitancia: la zona A
+  // (zoneId) ve las capas en su orden original; la zona B (neighborZoneId)
+  // las ve invertidas. Se calcula calcParams(layers) y calcParams(reverse).
+  //
+  // Cada entrada del cache contiene:
+  //   { surface, ziA, ziB, paramsA, paramsB, UA, valid }
+  // donde paramsA/paramsB son los resultados de calcParams() con el orden
+  // de capas que cada zona ve, y UA = U·area es común a ambas zonas
+  // (Three.js: U es la misma en ambos sentidos para un material lineal).
+
+  const sharedSurfCache = [];
+  surfaces.forEach(s=>{
+    if(s.partition !== 'shared') return;
+    if(!s.neighborZoneId) return;          // shared sin vecina → adiabática
+    if(s.zoneId === s.neighborZoneId) return; // patología, ya filtrado pero por seguridad
+    // v4.3: si el usuario etiquetó la superficie como adiabática, prevalece la
+    // etiqueta — no se acopla térmicamente entre zonas aunque sea 'shared'.
+    // Esto permite que una pared compartida se "anule" térmicamente sin
+    // cambiar su tipo de partición (útil para experimentos: ¿qué pasa si
+    // este muro no transmitiera calor?).
+    if((s.tag || autoTag(s)) === 'adiabática') return;
+    const ziA = zIds.indexOf(s.zoneId);
+    const ziB = zIds.indexOf(s.neighborZoneId);
+    // Ambas zonas deben ser térmicas (estar en zIds)
+    if(ziA < 0 || ziB < 0){
+      // Una de las zonas es shader o no existe → degradar a adiabática
+      return;
+    }
+    const layers = s.layers || [];
+    if(layers.length === 0) return;
+    const paramsA = calcParams(layers);
+    const paramsB = calcParams([...layers].reverse());
+    const UA = paramsA.U * s.area;
+    if(!isFinite(UA) || UA <= 0) return;
+    sharedSurfCache.push({
+      id: s.id, surface: s, ziA, ziB,
+      paramsA, paramsB, UA, area: s.area
+    });
+  });
+  if(sharedSurfCache.length>0){
+    log(`Fase 3: ${sharedSurfCache.length} superficie(s) compartida(s) acopladas térmicamente.`,'ok');
+  }
 
   // ── Diagnostic: exterior surfaces in thermal zones ────────────────
   {
@@ -22314,6 +22325,20 @@ function zdSchedCopyOpen(){
   document.getElementById('zdSchedCopyModal')?.remove();
 
   const origen = _zdSchedType;
+  // v9.2: zonas térmicas distintas de la actual, candidatas a recibir el
+  // horario. Las zonas S no aparecen: no tienen horarios.
+  const otrasZonas = zones.filter(x => x.thermal && x.id !== z.id).map(x => {
+    ensureZoneLoads(x);
+    return `
+    <label style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:.72rem;color:var(--text2)"
+      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='none'">
+      <input type="checkbox" class="zdcp-zone" value="${x.id}" style="cursor:pointer">
+      <span style="width:9px;height:9px;border-radius:2px;background:${x.color};flex-shrink:0"></span>
+      <span style="flex:1">${x.name}</span>
+      <span style="font-family:var(--font-mono);font-size:.62rem;color:var(--text3)">${_zdSchedResumen(x.id, origen)}</span>
+    </label>`;
+  }).join('');
+
   const destinos = ZD_SCHED_ORDER.filter(t => t !== origen).map(t => `
     <label style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:.72rem;color:var(--text2)"
       onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='none'">
@@ -22347,10 +22372,26 @@ function zdSchedCopyOpen(){
         ${ZD_SCHED_ORDER.map(t=>`<option value="${t}"${t===origen?' selected':''}>${ZD_SCHED_LABELS[t]} · ${_zdSchedResumen(z.id,t)}</option>`).join('')}
       </select>
 
-      <div style="font-size:.64rem;color:var(--text3);margin-bottom:4px">Destino — se sobrescribe por completo</div>
+      <div style="font-size:.64rem;color:var(--text3);margin-bottom:4px">
+        Destino — horarios de <b style="color:var(--text2)">esta</b> zona</div>
       <div style="border:1px solid var(--border);border-radius:5px;padding:3px;margin-bottom:10px">
         ${destinos}
       </div>
+
+      <!-- v9.2: copia entre zonas. Varias alcobas, aulas u oficinas suelen
+           compartir patrón de uso; repintar 168 celdas en cada una es trabajo
+           perdido y una fuente segura de incoherencias. -->
+      ${otrasZonas.length ? `
+      <div style="font-size:.64rem;color:var(--text3);margin-bottom:4px">
+        Destino — <b style="color:var(--text2)">otras zonas térmicas</b>
+        <span style="color:var(--text3)">(recibe el mismo horario de origen)</span></div>
+      <div style="border:1px solid var(--border);border-radius:5px;padding:3px;margin-bottom:8px;max-height:140px;overflow-y:auto">
+        ${otrasZonas}
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:10px">
+        <button class="btn btn-g btn-xs" onclick="document.querySelectorAll('.zdcp-zone').forEach(c=>c.checked=true)">Todas las zonas</button>
+        <button class="btn btn-g btn-xs" onclick="document.querySelectorAll('.zdcp-zone').forEach(c=>c.checked=false)">Ninguna</button>
+      </div>` : ''}
 
       <div style="display:flex;gap:4px;margin-bottom:12px">
         <button class="btn btn-g btn-xs" onclick="document.querySelectorAll('.zdcp-dst').forEach(c=>c.checked=true)">Marcar todos</button>
@@ -22385,31 +22426,58 @@ function zdSchedCopyApply(){
   const z = zones.find(x=>x.id===_zdZoneId);
   if(!z){ document.getElementById('zdSchedCopyModal')?.remove(); return; }
   const origen = document.getElementById('zdcpSrc')?.value || _zdSchedType;
-  const dst = [...document.querySelectorAll('.zdcp-dst')].filter(c=>c.checked).map(c=>c.value);
-  if(dst.length === 0){ log('Marca al menos un horario de destino.','warn'); return; }
+  const dst  = [...document.querySelectorAll('.zdcp-dst')].filter(c=>c.checked).map(c=>c.value);
+  const zDst = [...document.querySelectorAll('.zdcp-zone')].filter(c=>c.checked).map(c=>c.value);
+  if(dst.length === 0 && zDst.length === 0){
+    log('Marca al menos un horario o una zona de destino.','warn'); return;
+  }
 
   const src = getZoneSched(z.id, origen);
   if(!src){ log('No se pudo leer el horario de origen.','err'); return; }
 
+  // Escribe una copia POR VALOR en el esquema `t` de la zona `zz`.
+  // Float32Array.from crea un búfer propio: compartir la referencia haría
+  // que editar un horario modificara en silencio el de las demás zonas.
+  const escribir = (zz, t) => {
+    ensureZoneLoads(zz);
+    const copia = Float32Array.from(src);
+    if(t === 'shutter'){
+      if(!zz._loads.shutters) zz._loads.shutters = {surfIds:[], R:0.20, schedShutter:defaultSched('shutter')};
+      zz._loads.shutters.schedShutter = copia;
+    } else {
+      zz._loads[SCHED_KEYS[t]] = copia;
+    }
+  };
+
   let ok = 0;
   dst.forEach(t => {
     if(t === origen) return;                       // no copiarse sobre sí mismo
-    const copia = Float32Array.from(src);          // copia por valor, no la misma referencia
-    if(t === 'shutter'){
-      if(!z._loads.shutters) z._loads.shutters = {surfIds:[], R:0.20, schedShutter:defaultSched('shutter')};
-      z._loads.shutters.schedShutter = copia;
-    } else {
-      z._loads[SCHED_KEYS[t]] = copia;
-    }
+    escribir(z, t);
     ok++;
+  });
+
+  // v9.2: a otras zonas se copia el MISMO esquema de origen. Si además se
+  // marcaron esquemas destino, cada zona recibe también esos.
+  let okZonas = 0;
+  zDst.forEach(zid => {
+    const zz = zones.find(x => x.id === zid);
+    if(!zz || zz.id === z.id) return;
+    escribir(zz, origen);
+    dst.forEach(t => { if(t !== origen) escribir(zz, t); });
+    okZonas++;
   });
 
   document.getElementById('zdSchedCopyModal')?.remove();
   zdDrawSched();
   const horas = Array.from(src).reduce((a,b)=>a+b,0);
-  log(`Horario de ${ZD_SCHED_LABELS[origen]} (${horas.toFixed(0)} h/sem) copiado a ${ok} esquema(s): ` +
-      dst.filter(t=>t!==origen).map(t=>ZD_SCHED_LABELS[t]).join(', ') +
-      `. Vuelve a simular para ver el efecto.`, 'ok');
+  const partes = [];
+  if(ok > 0) partes.push(`${ok} esquema(s) de esta zona (${dst.filter(t=>t!==origen).map(t=>ZD_SCHED_LABELS[t]).join(', ')})`);
+  if(okZonas > 0){
+    const nombres = zDst.map(id => (zones.find(x=>x.id===id)||{}).name).filter(Boolean).join(', ');
+    partes.push(`${okZonas} zona(s): ${nombres}`);
+  }
+  log(`Horario de ${ZD_SCHED_LABELS[origen]} (${horas.toFixed(0)} h/sem) copiado a ` +
+      partes.join(' · ') + '. Vuelve a simular para ver el efecto.', 'ok');
 }
 
 function zdSchedDefault(){
