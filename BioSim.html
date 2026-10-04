@@ -20935,6 +20935,25 @@ function graficarC(){
   tbl.innerHTML=rows;
   parent.appendChild(tbl);
 
+  // ── v9.3: comparativa por zona térmica ────────────────────────────
+  // La tabla mensual de arriba es de la PRIMERA zona térmica. Esta compara
+  // todas, cada una con sus propias horas de ocupación.
+  const existingPZ = document.getElementById('confortPorZona');
+  if(existingPZ) existingPZ.remove();
+  if(results.length > 0){
+    const pz = document.createElement('div');
+    pz.id = 'confortPorZona';
+    pz.style.cssText = 'margin-top:10px';
+    pz.innerHTML = _confortPorZona(limitsPerMonth, [31,28,31,30,31,30,31,31,30,31,30,31])
+      .replace(/color:#0a2060/g,'color:var(--text)')
+      .replace(/background:#eaf0ff/g,'background:var(--bg3)')
+      .replace(/color:#667|color:#445|color:#778/g,'color:var(--text3)')
+      .replace(/color:#223/g,'color:var(--text2)')
+      .replace(/border-bottom:1px solid #eef0f8/g,'border-bottom:1px solid var(--border)')
+      .replace(/border-bottom:2px solid #dce4f0/g,'border-bottom:2px solid var(--border)');
+    parent.appendChild(pz);
+  }
+
   // ── Conclusions block ─────────────────────────────────────────────
   const existingConc = document.getElementById('confortConc');
   if(existingConc) existingConc.remove();
@@ -22497,6 +22516,188 @@ function zdSchedDefault(){
 // ═══════════════════════════════════════════════════════════════════
 //  CIBSE-STYLE ENERGY BALANCE REPORT  (mirrors PDF structure)
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+//  DESGLOSE POR ZONA TÉRMICA EN LOS INFORMES (v9.3)
+//
+//  Hasta ahora el informe de balance fundía las zonas en un único total y
+//  el análisis de confort se calculaba solo sobre results[0], es decir la
+//  primera zona térmica. En un modelo de una zona daba igual; en una
+//  vivienda con cocina, salón, baño y dos alcobas, el total oculta
+//  precisamente lo que interesa: qué recinto se sobrecalienta, cuál pierde
+//  calor por la cubierta y cuál no cumple confort.
+//
+//  Los datos ya existían — _eBalanceZones guarda el balance por zona y
+//  results[] las 8760 h de cada una — pero no se mostraban.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Agrupa los términos del balance de UNA zona en las seis partidas que se
+// muestran, con el mismo criterio que el resumen general.
+function _zonaPartidas(z){
+  const g = {
+    'Acristalamientos': (z.gainGlaz||0)+(z.gainGlazSol||0)+(z.gainWindows||0)+(z.gainSolarDir||0),
+    'Muros':            (z.gainWalls||0)+(z.gainWallsSol||0),
+    'Cubierta':         (z.gainRoof||0)+(z.gainRoofSol||0),
+    'Piso / terreno':   (z.gainFloor||0),
+    'Interzonal':       (z.gainShared||0),
+    'Internas':         (z.gainPeople||0)+(z.gainLighting||0)+(z.gainEquip||0),
+    'Aire':             (z.gainInfil||0)+(z.gainVent||0)
+  };
+  const p = {
+    'Acristalamientos': (z.lossGlaz||0)+(z.lossWindows||0),
+    'Muros':            (z.lossWalls||0),
+    'Cubierta':         (z.lossRoof||0),
+    'Piso / terreno':   (z.lossFloor||0),
+    'Interzonal':       (z.lossShared||0),
+    'Internas':         0,
+    'Aire':             (z.lossInfil||0)+(z.lossVent||0)
+  };
+  return {g, p};
+}
+
+// Tabla de balance desglosada por zona térmica, para el informe.
+// Resumen de confort de UNA zona, sobre sus propias horas ocupadas.
+// results[zi] ↔ thermalZones[zi]; nunca zones[zi].
+function _confortDeZona(zi, limitsPerMonth, diasMes){
+  // thermalZones es local a simular(); aquí se reconstruye desde el estado
+  // global con el MISMO criterio, para que results[zi] siga correspondiendo
+  // a la zona correcta.
+  const tz  = zones.filter(x => x.thermal);
+  const arr = results[zi];
+  const z   = tz[zi];
+  if(!arr || !z) return null;
+  const mask = buildOccMask(z);
+  let in80=0, in90=0, bajo=0, alto=0, n=0, suma=0, mx=-1e9, mn=1e9;
+  let h=0;
+  diasMes.forEach((d, mi)=>{
+    const L = limitsPerMonth[mi];
+    for(let k=0;k<d*24;k++,h++){
+      if(mask && !mask[h]) continue;
+      const t = arr[h];
+      if(t===undefined) continue;
+      n++; suma+=t; if(t>mx) mx=t; if(t<mn) mn=t;
+      if(t>=L.min80 && t<=L.max80) in80++;
+      if(t>=L.min90 && t<=L.max90) in90++;
+      if(t <  L.min80) bajo++;
+      if(t >  L.max80) alto++;
+    }
+  });
+  if(n===0) return null;
+  return {
+    nombre:z.name, color:z.color, horas:n, conHorario:!!mask,
+    pct80:in80/n*100, pct90:in90/n*100, pctBajo:bajo/n*100, pctAlto:alto/n*100,
+    TiMedia:suma/n, TiMax:mx, TiMin:mn
+  };
+}
+
+// Tabla comparativa de confort por zona térmica.
+function _confortPorZona(limitsPerMonth, diasMes){
+  if(!results || results.length === 0) return '';
+  const filas = results.map((_, zi)=>_confortDeZona(zi, limitsPerMonth, diasMes)).filter(Boolean);
+  if(filas.length === 0) return '';
+  const col = p => p>=70?'#2e8b4a' : p>=50?'#b8860b' : '#c0392b';
+  const cuerpo = filas.map(f=>`
+    <tr style="border-bottom:1px solid #eef0f8">
+      <td style="padding:3px 8px;font-size:.62rem;font-weight:600;color:#223;white-space:nowrap">
+        <span style="display:inline-block;width:9px;height:9px;background:${f.color};border-radius:2px;margin-right:5px;vertical-align:middle"></span>${f.nombre}
+      </td>
+      <td style="padding:3px 8px;text-align:right;font-family:monospace;font-weight:700;color:${col(f.pct80)}">${f.pct80.toFixed(1)}%</td>
+      <td style="padding:3px 8px;text-align:right;font-family:monospace;color:${col(f.pct90)}">${f.pct90.toFixed(1)}%</td>
+      <td style="padding:3px 8px;text-align:right;font-family:monospace;color:#2060c0">${f.pctBajo.toFixed(1)}%</td>
+      <td style="padding:3px 8px;text-align:right;font-family:monospace;color:#c04010">${f.pctAlto.toFixed(1)}%</td>
+      <td style="padding:3px 8px;text-align:right;font-family:monospace">${f.TiMedia.toFixed(1)}</td>
+      <td style="padding:3px 8px;text-align:right;font-family:monospace;color:#c04010">${f.TiMax.toFixed(1)}</td>
+      <td style="padding:3px 8px;text-align:right;font-family:monospace;color:#2060c0">${f.TiMin.toFixed(1)}</td>
+      <td style="padding:3px 8px;text-align:right;font-family:monospace;font-size:.56rem;color:#778">${f.horas}${f.conHorario?'':' *'}</td>
+    </tr>`).join('');
+  const sinHorario = filas.some(f=>!f.conHorario);
+  const peor = filas.reduce((a,b)=>b.pct80<a.pct80?b:a);
+  const mejor= filas.reduce((a,b)=>b.pct80>a.pct80?b:a);
+
+  return `
+  <div style="margin-top:16px;page-break-inside:avoid">
+    <div style="font-weight:700;font-size:.78rem;color:#0a2060;border-bottom:2px solid #dce4f0;padding-bottom:3px;margin-bottom:6px">
+      Confort por zona térmica
+    </div>
+    <div style="font-size:.58rem;color:#667;line-height:1.5;margin-bottom:6px">
+      Cada zona evaluada sobre <b>sus propias horas de ocupación</b>, no sobre las de la primera.
+      «Frío» y «Calor» reparten las horas fuera de la banda del 80% según el lado por el que se sale.
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:.62rem">
+      <tr style="background:#eaf0ff;font-weight:700;color:#0a2060">
+        <th style="padding:3px 8px;text-align:left">Zona</th>
+        <th style="padding:3px 8px;text-align:right">Confort 80%</th>
+        <th style="padding:3px 8px;text-align:right">90%</th>
+        <th style="padding:3px 8px;text-align:right">Frío</th>
+        <th style="padding:3px 8px;text-align:right">Calor</th>
+        <th style="padding:3px 8px;text-align:right">T media</th>
+        <th style="padding:3px 8px;text-align:right">T máx</th>
+        <th style="padding:3px 8px;text-align:right">T mín</th>
+        <th style="padding:3px 8px;text-align:right">h eval.</th>
+      </tr>
+      ${cuerpo}
+    </table>
+    ${filas.length>1 ? `<div style="font-size:.58rem;color:#445;margin-top:5px;line-height:1.5">
+      Zona más desfavorable: <b>${peor.nombre}</b> (${peor.pct80.toFixed(1)}%) ·
+      más favorable: <b>${mejor.nombre}</b> (${mejor.pct80.toFixed(1)}%) ·
+      diferencia <b>${(mejor.pct80-peor.pct80).toFixed(1)}</b> puntos.
+    </div>`:''}
+    ${sinHorario ? '<div style="font-size:.55rem;color:#a06000;margin-top:4px">* zona sin horario de ocupación: evaluada sobre las 8760 h, lo que tiende a sobrestimar el confort.</div>':''}
+  </div>`;
+}
+
+function _informePorZona(eB, eZ, kwh){
+  if(!eB || !eZ || eB.length < 1) return '';
+  const filas = eB.map((zb, i) => {
+    const z = zones.find(x => x.id === eZ[i]);
+    const nombre = z ? z.name : (eZ[i] || `Zona ${i+1}`);
+    const {g, p} = _zonaPartidas(zb);
+    const gT = Object.values(g).reduce((a,b)=>a+b,0);
+    const pT = Object.values(p).reduce((a,b)=>a+b,0);
+    const neto = gT - pT;
+    const vol = z ? z.volume : null;
+    // Intensidad por volumen: permite comparar recintos de tamaño distinto,
+    // que es lo que el total agregado impide.
+    const int = (vol && vol > 0) ? (neto/1000/vol) : null;
+    const cel = v => `<td style="padding:2px 7px;text-align:right;font-family:monospace;font-size:.6rem">${kwh(v)}</td>`;
+    return `<tr style="border-bottom:1px solid #eef0f8">
+      <td style="padding:2px 8px;font-size:.62rem;color:#223;font-weight:600;white-space:nowrap">
+        <span style="display:inline-block;width:9px;height:9px;background:${z?z.color:'#889'};border-radius:2px;margin-right:5px;vertical-align:middle"></span>${nombre}
+      </td>
+      ${['Acristalamientos','Muros','Cubierta','Piso / terreno','Interzonal','Internas','Aire']
+        .map(k=>cel(g[k]-p[k])).join('')}
+      <td style="padding:2px 8px;text-align:right;font-family:monospace;font-weight:700;font-size:.62rem;color:${neto>=0?'#c04010':'#2060c0'}">${kwh(neto)}</td>
+      <td style="padding:2px 8px;text-align:right;font-family:monospace;font-size:.58rem;color:#667">${int!==null?int.toFixed(1):'—'}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div style="margin-top:18px;page-break-inside:avoid">
+    <div style="font-weight:700;font-size:.78rem;color:#0a2060;border-bottom:2px solid #dce4f0;padding-bottom:3px;margin-bottom:6px">
+      Balance neto por zona térmica
+    </div>
+    <div style="font-size:.58rem;color:#667;line-height:1.5;margin-bottom:6px">
+      Cada celda es <b>ganancia menos pérdida</b> de esa partida, en kWh/año.
+      Positivo (rojo) = la zona recibe calor por esa vía; negativo (azul) = lo cede.
+      La última columna normaliza el neto por volumen, para poder comparar recintos de tamaño distinto.
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:.6rem">
+      <tr style="background:#eaf0ff;font-weight:700;color:#0a2060">
+        <th style="padding:3px 8px;text-align:left">Zona</th>
+        <th style="padding:3px 7px;text-align:right">Acrist.</th>
+        <th style="padding:3px 7px;text-align:right">Muros</th>
+        <th style="padding:3px 7px;text-align:right">Cubierta</th>
+        <th style="padding:3px 7px;text-align:right">Piso</th>
+        <th style="padding:3px 7px;text-align:right">Interzonal</th>
+        <th style="padding:3px 7px;text-align:right">Internas</th>
+        <th style="padding:3px 7px;text-align:right">Aire</th>
+        <th style="padding:3px 8px;text-align:right">Neto</th>
+        <th style="padding:3px 8px;text-align:right">kWh/m³</th>
+      </tr>
+      ${filas}
+    </table>
+  </div>`;
+}
+
 function generarInforme(){
   const eB=window._eBalance, eZ=window._eBalanceZones;
   const div=document.getElementById('reportHtml');
@@ -23003,6 +23204,8 @@ function generarInforme(){
         </tr>
       </table>
     </div>
+
+    ${_informePorZona(eB, eZ, kwh)}
 
     <div style="text-align:right;margin-top:6px;font-size:.55rem;color:#9090b0">
       Método: CIBSE Admittance · Y-values: transfer matrix (diurnal ω) · T_sol-air incluida · Ganancias internas: CIBSE Guide A §6
