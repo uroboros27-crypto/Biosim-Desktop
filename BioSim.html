@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v10.2</title>
+<title>BioSim v11.0</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4126,7 +4126,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v10.2</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.0</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5149,6 +5149,7 @@ canvas#cv{display:block;}
       <div class="rtab" onclick="showRTab('rProp')">Prop.</div>
       <div class="rtab" onclick="showRTab('rConst')">Const.</div>
       <div class="rtab" onclick="showRTab('rLib')">MAT</div>
+      <div class="rtab" onclick="showRTab('rHvac');calcularHVAC()" title="Estimación preliminar de cargas y consumo por el método de cargas ideales">HVAC</div>
     </div>
     <div class="rbody" id="rProp">
       <div style="color:var(--text3);font-size:.74rem;text-align:center;padding:20px 0" id="rPropContent">
@@ -5165,6 +5166,11 @@ canvas#cv{display:block;}
         Selecciona una zona
       </div>
     </div>
+    <!-- v11.0: módulo HVAC — cargas ideales -->
+    <div class="rbody" id="rHvac" style="display:none;padding:0">
+      <div id="rHvacBody"></div>
+    </div>
+
     <div class="rbody" id="rLib" style="display:none;padding:0">
       <!-- Header: New Material Button -->
       <div style="padding:8px 10px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0">
@@ -5585,7 +5591,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v10.2 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.0 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -5992,7 +5998,8 @@ let _usingOrtho=false;
 let surfaces=[],zones=[],layers=[];
 let sel=new Set();
 let activeZone=null, activeTool='sel';
-let epwT=[],epwDN=[],epwDH=[],epwWS=[];  // EPW arrays: Temp, DirectNormal, DiffuseHoriz, WindSpeed
+let epwT=[],epwDN=[],epwDH=[],epwWS=[],epwDP=[];
+let epwAlt = 0;                      // v11.0: altitud del emplazamiento (m)  // EPW arrays: Temp, DirectNormal, DiffuseHoriz, WindSpeed
 let results=[];
 let chartA=null,chartC=null,chartP=null;
 let _ppfPeriod='anual'; // current period for hourly profile chart
@@ -11213,7 +11220,7 @@ function showSurfProps(surf){
   // el usuario en la pestaña MAT, cualquier cambio de selección — o cualquier
   // edición múltiple, que repinta el panel — lo devolvía a Prop. Efecto
   // observado: "no se puede desplegar la pestaña de materiales".
-  const validTabs=['rProp','rConst','rSolar','rLib'];
+  const validTabs=['rProp','rConst','rSolar','rLib','rHvac'];
   const currentTabId=activeTab?.getAttribute('onclick')?.match(/showRTab\('(\w+)'\)/)?.[1];
   if(!currentTabId||!validTabs.includes(currentTabId)) showRTab('rProp');
 }
@@ -11451,7 +11458,7 @@ function showMultiSurfProps(){
   // el usuario en la pestaña MAT, cualquier cambio de selección — o cualquier
   // edición múltiple, que repinta el panel — lo devolvía a Prop. Efecto
   // observado: "no se puede desplegar la pestaña de materiales".
-  const validTabs = ['rProp','rConst','rSolar','rLib'];
+  const validTabs = ['rProp','rConst','rSolar','rLib','rHvac'];
   const currentTabId = activeTab?.getAttribute('onclick')?.match(/showRTab\('(\w+)'\)/)?.[1];
   if(!currentTabId || !validTabs.includes(currentTabId)) showRTab('rProp');
 }
@@ -17093,7 +17100,7 @@ document.getElementById('fEPW').addEventListener('change',e=>{
   const reader=new FileReader();
   reader.onload=ev=>{
     const lines=ev.target.result.split('\n');
-    epwT=[]; epwDN=[]; epwDH=[]; epwWS=[];
+    epwT=[]; epwDN=[]; epwDH=[]; epwWS=[]; epwDP=[];
     // ── Extraer lat/lon/ciudad de la línea 1 (LOCATION) ──
     if(lines[0]){
       const loc=lines[0].split(',');
@@ -17129,12 +17136,21 @@ document.getElementById('fEPW').addEventListener('change',e=>{
     }
     for(let i=8;i<lines.length;i++){
       const c=lines[i].split(',');
-      if(c.length>21){epwT.push(+c[6]||0);epwDN.push(+c[14]||0);epwDH.push(+c[15]||0);epwWS.push(+c[21]||0);}else if(c.length>15){epwT.push(+c[6]||0);epwDN.push(+c[14]||0);epwDH.push(+c[15]||0);epwWS.push(0);}
+      if(c.length>21){epwT.push(+c[6]||0);epwDN.push(+c[14]||0);epwDH.push(+c[15]||0);epwWS.push(+c[21]||0);
+        // v11.0: temperatura de rocío (col. 8 del EPW). Hasta ahora se
+        // ignoraba; es lo que permite calcular la carga latente, que en
+        // clima cálido-húmedo es una fracción grande de la refrigeración.
+        epwDP.push(+c[7]);}else if(c.length>15){epwT.push(+c[6]||0);epwDN.push(+c[14]||0);epwDH.push(+c[15]||0);epwWS.push(0);}
     }
     if(epwT.length>=8760){
       // v7.9: registrar la procedencia para poder guardarla en el proyecto
       const _loc = (lines[0]||'').split(',');
+      // v11.0: altitud del emplazamiento (campo 10 de LOCATION). Importa en
+      // psicrometría: a 1065 m la presión baja a ~89 kPa y la razón de
+      // humedad para un mismo punto de rocío sube más de un 10%.
+      epwAlt = isFinite(+_loc[9]) ? +_loc[9] : 0;
       epwMeta = {
+        alt: epwAlt,
         name: (_f && _f.name) || 'EPW',
         city: (_loc[1]||'').trim(),
         lat: _latitude, lon: _longitude
@@ -17154,7 +17170,7 @@ document.getElementById('fEPW').addEventListener('change',e=>{
 });
 
 function cargarDemoEPW(){
-  epwT=[]; epwDN=[]; epwDH=[]; epwWS=[];
+  epwT=[]; epwDN=[]; epwDH=[]; epwWS=[]; epwDP=[];
   for(let h=0;h<8760;h++){
     const d=h/24, hr=h%24;
     epwT.push(18-10*Math.cos(2*Math.PI*d/365)+6*Math.sin(Math.PI*hr/12-Math.PI/3)+(Math.random()-.5));
@@ -19061,6 +19077,7 @@ async function simular(){
   document.getElementById('simProg').classList.add('h');
   if(!cancelSim){
     log(`Simulación completa: ${thermalZones.length} zona(s) T × 8760 h.`,'ok');
+    try{ if(typeof calcularHVAC === 'function') calcularHVAC(); }catch(e){}   // v11.0
     document.getElementById('bCSV').disabled=false;
     const bCSV2=document.getElementById('bCSV2'); if(bCSV2) bCSV2.disabled=false;
     document.getElementById('btmPanel').classList.add('open');
@@ -21565,7 +21582,7 @@ function showRTab(t){
     el.classList.add('act');
     el.style.display=(t==='rLib')?'flex':'block';
   }
-  ['rProp','rConst','rZone','rLib','rSolar'].forEach(id=>{
+  ['rProp','rConst','rZone','rLib','rSolar','rHvac'].forEach(id=>{
     if(id!==t){ const e2=document.getElementById(id); if(e2){ e2.classList.remove('act'); e2.style.display='none'; } }
   });
 }
@@ -22803,6 +22820,293 @@ function _actualizarBotonFiltro(){
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  MÓDULO HVAC · CARGAS IDEALES (v11.0)
+//
+//  CÁLCULO PRELIMINAR. No es un dimensionamiento de equipo.
+//
+//  Qué hace: a partir de la temperatura en régimen libre que ya resolvió la
+//  simulación, estima la potencia que habría que aportar o extraer en cada
+//  hora para sostener la zona en consigna, y acumula la energía térmica
+//  anual. Es el enfoque de «cargas ideales»: un sistema sin pérdidas, de
+//  capacidad ilimitada, que mantiene la consigna cueste lo que cueste.
+//
+//  CÓMO SE CALCULA LA CARGA SENSIBLE
+//    Q_sens(h) = H_zona · (T_consigna − T_libre(h))
+//  donde H_zona es la conductancia total de la zona hacia todo aquello con
+//  lo que intercambia calor:
+//    H_zona = Σ(U·A) envolvente + Σ(Y·A) masa térmica + ṁ_aire·Cp
+//  Es decir, los vatios por kelvin que hay que inyectar para mantener la
+//  zona apartada de donde quiere estar por sí sola.
+//
+//  CÓMO SE CALCULA LA CARGA LATENTE
+//    Q_lat(h) = ṁ_aire · h_fg · (W_ext − W_consigna)
+//  con W_ext deducida del punto de rocío del EPW y W_consigna fijada por la
+//  humedad relativa objetivo. Es el criterio de los procedimientos de carga
+//  de ASHRAE y CIBSE: no requiere balance dinámico de humedad porque se
+//  supone que el equipo sostiene la consigna. Solo se contabiliza en horas
+//  de refrigeración y cuando el aire exterior está más húmedo que el
+//  interior; nunca como aporte.
+//
+//  LO QUE ESTA FORMULACIÓN NO HACE — y conviene tenerlo presente:
+//   · Es una linealización en torno al régimen libre, no un balance con
+//     control hora a hora. La carga real diverge cuando el sistema modifica
+//     mucho el estado de la masa térmica respecto al caso libre.
+//   · El control es sobre temperatura de AIRE. El modelo es de un solo nodo
+//     y no separa la fracción radiante, así que no puede controlar sobre
+//     temperatura operativa.
+//   · No modela recuperación de calor, economizador, free-cooling,
+//     deshumidificación por sobreenfriamiento y recalentamiento, ni
+//     almacenamiento de humedad en los materiales.
+//   · No aplica factores de seguridad ni margen de puesta en régimen.
+//  Sirve para comparar alternativas de proyecto, no para seleccionar equipo.
+// ═══════════════════════════════════════════════════════════════════════
+
+const HVAC_DEF = {
+  tHeat: 20, tCool: 25, rhSet: 55,
+  copHeat: 3.0, copCool: 3.0,
+  soloOcupadas: true
+};
+
+// Presión atmosférica según altitud, para la psicrometría.
+function _presionAtm(){
+  const alt = (typeof epwAlt === 'number' && isFinite(epwAlt)) ? epwAlt : 0;
+  return 101325 * Math.pow(1 - 2.25577e-5 * alt, 5.2559);
+}
+
+// Presión de vapor de saturación (Pa) · fórmula de Magnus sobre agua líquida
+function _pSat(T){ return 610.94 * Math.exp(17.625 * T / (T + 243.04)); }
+
+// Razón de humedad (kg agua / kg aire seco) a partir del punto de rocío
+function _wDeRocio(Tdp, P){
+  if(!isFinite(Tdp)) return NaN;
+  const pv = _pSat(Tdp);
+  return 0.621945 * pv / Math.max(1, P - pv);
+}
+// Razón de humedad a partir de temperatura y humedad relativa (%)
+function _wDeHR(T, hr, P){
+  const pv = _pSat(T) * Math.max(0, Math.min(100, hr)) / 100;
+  return 0.621945 * pv / Math.max(1, P - pv);
+}
+
+// Conductancia total de una zona, en W/K.
+function _hZona(z){
+  let UA = 0, YA = 0;
+  surfaces.forEach(sf => {
+    if(sf.zoneId !== z.id || !sf.layers || !sf.layers.length) return;
+    const tag = sf.tag || autoTag(sf);
+    const p = calcParams(sf.layers);
+    if(!p || !isFinite(p.U)) return;
+    if(isFinite(p.Y)) YA += p.Y * sf.area;        // acoplamiento con la masa
+    if(tag === 'adiabática') return;              // sin conducción neta
+    if(sf.exterior) UA += p.U * sf.area;          // envolvente al exterior
+  });
+  // Renovaciones de aire: ventilación + infiltración, a caudal nominal
+  const L = z._loads || {};
+  const vol = z.volume || 0;
+  const flA = (typeof _zoneFloorArea === 'function') ? _zoneFloorArea(z.id) : 0;
+  let achV = 0;
+  if(L.ventMethod === 'ach')           achV = L.ventACH || 0;
+  else if(L.ventMethod === 'per_person' || L.ventMethod === 'perPerson')
+    achV = vol>0 ? (L.ventPerPerson||10) * ((L.occCount>0?L.occCount:(L.occDensity||0)*flA)) * 3.6 / vol : 0;
+  else if(L.ventMethod === 'per_area' || L.ventMethod === 'perArea')
+    achV = vol>0 ? (L.ventPerArea||0.5) * flA * 3.6 / vol : 0;
+  else achV = L.ventACH || 0;
+  const ach = achV + (L.infiltACH || 0);
+  const mCp = ach * vol * 1.2 * 1005 / 3600;      // W/K
+  return {UA, YA, mCp, H: UA + YA + mCp, ach, vol};
+}
+
+let _hvacRes = null;
+
+function calcularHVAC(){
+  const cont = document.getElementById('rHvacBody');
+  if(!cont) return;
+  if(!results || results.length === 0){
+    cont.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:.68rem;line-height:1.6">' +
+      'Ejecuta primero la simulación anual. El módulo HVAC trabaja sobre la temperatura ' +
+      'en régimen libre que calcula el motor térmico.</div>';
+    return;
+  }
+  const g = id => parseFloat(document.getElementById(id)?.value);
+  const tHeat = isFinite(g('hvTHeat')) ? g('hvTHeat') : HVAC_DEF.tHeat;
+  const tCool = isFinite(g('hvTCool')) ? g('hvTCool') : HVAC_DEF.tCool;
+  const rhSet = isFinite(g('hvRH'))    ? g('hvRH')    : HVAC_DEF.rhSet;
+  const copH  = isFinite(g('hvCopH'))  ? g('hvCopH')  : HVAC_DEF.copHeat;
+  const copC  = isFinite(g('hvCopC'))  ? g('hvCopC')  : HVAC_DEF.copCool;
+  const soloOcup = document.getElementById('hvSoloOcup')?.checked !== false;
+
+  if(tCool <= tHeat){
+    cont.innerHTML = '<div style="padding:14px;color:var(--warn);font-size:.68rem">' +
+      'La consigna de refrigeración debe ser mayor que la de calefacción.</div>';
+    return;
+  }
+
+  const P = _presionAtm();
+  const hayRocio = epwDP && epwDP.length >= 8760;
+  const Wsp = _wDeHR(tCool, rhSet, P);
+  const HFG = 2454000;                     // calor latente de vaporización, J/kg
+
+  const tz = zones.filter(z => z.thermal);
+  const filas = [];
+
+  results.forEach((arr, zi) => {
+    const z = tz[zi];
+    if(!z || !arr) return;
+    const hz = _hZona(z);
+    const mask = soloOcup ? buildOccMask(z) : null;
+    const mAire = hz.ach * hz.vol * 1.2 / 3600;    // kg/s de aire exterior
+
+    let Ecal=0, Eref=0, Elat=0;            // Wh térmicos
+    let Pcal=0, Pref=0, Plat=0;            // W pico
+    let hCal=0, hRef=0, hLibre=0;
+
+    for(let h=0; h<arr.length && h<8760; h++){
+      if(mask && !mask[h]) continue;
+      const Tf = arr[h];
+      if(!isFinite(Tf)) continue;
+      if(Tf < tHeat){
+        const q = hz.H * (tHeat - Tf);
+        Ecal += q; if(q > Pcal) Pcal = q; hCal++;
+      } else if(Tf > tCool){
+        const q = hz.H * (Tf - tCool);
+        Eref += q; if(q > Pref) Pref = q; hRef++;
+        // Latente: solo al refrigerar y solo si el exterior está más húmedo
+        if(hayRocio && mAire > 0){
+          const Wext = _wDeRocio(epwDP[h], P);
+          if(isFinite(Wext) && Wext > Wsp){
+            const ql = mAire * HFG * (Wext - Wsp);
+            Elat += ql; if(ql > Plat) Plat = ql;
+          }
+        }
+      } else hLibre++;
+    }
+
+    const flA = _zoneFloorArea(z.id) || 0;
+    filas.push({
+      zona:z.name, color:z.color, area:flA, H:hz.H, UA:hz.UA, YA:hz.YA, mCp:hz.mCp,
+      kwhCal:Ecal/1000, kwhRef:Eref/1000, kwhLat:Elat/1000,
+      kwRef:Pref/1000, kwCal:Pcal/1000, kwLat:Plat/1000,
+      hCal, hRef, hLibre,
+      elecCal:(Ecal/1000)/Math.max(.1,copH),
+      elecRef:((Eref+Elat)/1000)/Math.max(.1,copC)
+    });
+  });
+
+  _hvacRes = {filas, tHeat, tCool, rhSet, copH, copC, hayRocio, soloOcup, Wsp};
+  _renderHVAC();
+}
+
+function _renderHVAC(){
+  const cont = document.getElementById('rHvacBody');
+  if(!cont || !_hvacRes) return;
+  const R = _hvacRes, f = R.filas;
+  const T = k => f.reduce((a,x)=>a+x[k], 0);
+  const nf = (v,d=0) => v.toLocaleString('es',{minimumFractionDigits:d,maximumFractionDigits:d});
+  const areaT = T('area');
+
+  const tot = {
+    cal:T('kwhCal'), ref:T('kwhRef'), lat:T('kwhLat'),
+    elecCal:T('elecCal'), elecRef:T('elecRef')
+  };
+  tot.term = tot.cal + tot.ref + tot.lat;
+  tot.elec = tot.elecCal + tot.elecRef;
+
+  const filasHTML = f.map(x=>`
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:3px 6px;white-space:nowrap">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${x.color};margin-right:4px"></span>${x.zona}</td>
+      <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono)">${nf(x.H)}</td>
+      <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);color:#e07a3c">${nf(x.kwCal,1)}</td>
+      <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);color:#3c8ae0">${nf(x.kwRef+x.kwLat,1)}</td>
+      <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);color:#e07a3c">${nf(x.kwhCal)}</td>
+      <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);color:#3c8ae0">${nf(x.kwhRef)}</td>
+      <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);color:#6ab0d0">${nf(x.kwhLat)}</td>
+      <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);font-weight:700">${nf(x.elecCal+x.elecRef)}</td>
+      <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);font-size:.56rem;color:var(--text3)">${x.hCal}/${x.hRef}</td>
+    </tr>`).join('');
+
+  cont.innerHTML = `
+  <div style="padding:8px">
+    <div style="background:rgba(220,160,60,.10);border:1px solid rgba(220,160,60,.4);border-radius:5px;
+         padding:7px 9px;font-size:.6rem;line-height:1.55;color:var(--text2);margin-bottom:9px">
+      <b style="color:var(--warn)">⚠ Cálculo preliminar</b> — estimación por <b>cargas ideales</b>:
+      un sistema sin pérdidas y de capacidad ilimitada que sostiene la consigna.
+      Sirve para <b>comparar alternativas de proyecto</b>, no para seleccionar equipo.
+      No incluye factores de seguridad, recuperación de calor, free-cooling ni puesta en régimen,
+      y controla sobre temperatura de aire, no operativa.
+    </div>
+
+    <div class="section-hdr">Consignas</div>
+    <div class="prow"><div class="plbl">Calefacción</div>
+      <input class="pinp" type="number" id="hvTHeat" value="${R.tHeat}" step="0.5" onchange="calcularHVAC()"><span class="punit">°C</span></div>
+    <div class="prow"><div class="plbl">Refrigeración</div>
+      <input class="pinp" type="number" id="hvTCool" value="${R.tCool}" step="0.5" onchange="calcularHVAC()"><span class="punit">°C</span></div>
+    <div class="prow"><div class="plbl" title="Humedad relativa objetivo en refrigeración. Fija la razón de humedad interior con la que se calcula la carga latente.">HR objetivo ℹ</div>
+      <input class="pinp" type="number" id="hvRH" value="${R.rhSet}" step="1" min="30" max="80" onchange="calcularHVAC()"><span class="punit">%</span></div>
+    <div class="prow"><div class="plbl">Solo horas ocupadas</div>
+      <input type="checkbox" id="hvSoloOcup" ${R.soloOcup?'checked':''} onchange="calcularHVAC()" style="cursor:pointer"></div>
+
+    <div class="section-hdr">Rendimiento del equipo</div>
+    <div class="prow"><div class="plbl" title="Coeficiente de rendimiento en calefacción. 1.0 = resistencia eléctrica; 3–4 = bomba de calor.">COP calefacción ℹ</div>
+      <input class="pinp" type="number" id="hvCopH" value="${R.copH}" step="0.1" min="0.1" onchange="calcularHVAC()"></div>
+    <div class="prow"><div class="plbl" title="Coeficiente de rendimiento en refrigeración (EER/COP). 2.5–3.5 equipo convencional; 4+ alta eficiencia.">COP refrigeración ℹ</div>
+      <input class="pinp" type="number" id="hvCopC" value="${R.copC}" step="0.1" min="0.1" onchange="calcularHVAC()"></div>
+
+    <div class="section-hdr">Resultados por zona</div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:.58rem;color:var(--text2)">
+      <tr style="background:var(--bg3);font-weight:700;color:var(--text2)">
+        <th style="padding:3px 6px;text-align:left">Zona</th>
+        <th style="padding:3px 6px;text-align:right" title="Conductancia total: ΣUA + ΣYA + ṁCp">W/K</th>
+        <th style="padding:3px 6px;text-align:right">Pico cal.<br>kW</th>
+        <th style="padding:3px 6px;text-align:right">Pico ref.<br>kW</th>
+        <th style="padding:3px 6px;text-align:right">Calef.<br>kWh</th>
+        <th style="padding:3px 6px;text-align:right">Refrig.<br>kWh</th>
+        <th style="padding:3px 6px;text-align:right">Latente<br>kWh</th>
+        <th style="padding:3px 6px;text-align:right">Eléctr.<br>kWh</th>
+        <th style="padding:3px 6px;text-align:right">h cal/ref</th>
+      </tr>
+      ${filasHTML}
+      <tr style="background:var(--bg3);font-weight:700">
+        <td style="padding:3px 6px">TOTAL</td><td></td><td></td><td></td>
+        <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);color:#e07a3c">${nf(tot.cal)}</td>
+        <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);color:#3c8ae0">${nf(tot.ref)}</td>
+        <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono);color:#6ab0d0">${nf(tot.lat)}</td>
+        <td style="padding:3px 6px;text-align:right;font-family:var(--font-mono)">${nf(tot.elec)}</td>
+        <td></td>
+      </tr>
+    </table>
+    </div>
+
+    <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <div style="background:var(--bg3);border-radius:5px;padding:7px 9px">
+        <div style="font-size:.55rem;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Demanda térmica</div>
+        <div style="font-size:1.05rem;font-weight:700;color:var(--text)">${nf(tot.term)} <span style="font-size:.6rem;font-weight:400">kWh<sub>t</sub></span></div>
+        <div style="font-size:.55rem;color:var(--text3)">${areaT>0?nf(tot.term/areaT,1)+' kWh/m²·año':''}</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:5px;padding:7px 9px">
+        <div style="font-size:.55rem;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Consumo eléctrico</div>
+        <div style="font-size:1.05rem;font-weight:700;color:var(--accent)">${nf(tot.elec)} <span style="font-size:.6rem;font-weight:400">kWh<sub>e</sub></span></div>
+        <div style="font-size:.55rem;color:var(--text3)">${areaT>0?nf(tot.elec/areaT,1)+' kWh/m²·año':''}</div>
+      </div>
+    </div>
+
+    <div style="font-size:.57rem;color:var(--text3);line-height:1.6;margin-top:9px;border-top:1px solid var(--border);padding-top:7px">
+      <b style="color:var(--text2)">Cómo se obtiene.</b>
+      Sensible: <span style="font-family:var(--font-mono)">Q = H·(T_consigna − T_libre)</span>, con
+      H = ΣU·A + ΣY·A + ṁ·Cp.
+      ${R.hayRocio
+        ? `Latente: <span style="font-family:var(--font-mono)">Q = ṁ·h_fg·(W_ext − W_consigna)</span>,
+           con W_ext del punto de rocío del EPW y W_consigna = ${(R.Wsp*1000).toFixed(1)} g/kg
+           (${R.rhSet}% HR a ${R.tCool}°C). Solo en horas de refrigeración y con el exterior más húmedo.`
+        : `<b style="color:var(--warn)">Sin carga latente:</b> el clima cargado no trae punto de rocío.
+           Vuelve a cargar el EPW para incluirla — en clima cálido-húmedo puede ser un tercio de la refrigeración.`}
+      <div style="margin-top:4px">Eléctrico = térmico ÷ COP. La demanda térmica es independiente del equipo; el consumo no.</div>
+    </div>
+  </div>`;
+}
+
 function _confortDeZona(zi, limitsPerMonth, diasMes){
   // thermalZones es local a simular(); aquí se reconstruye desde el estado
   // global con el MISMO criterio, para que results[zi] siga correspondiendo
@@ -23547,7 +23851,8 @@ function guardarProyectoAs(evt){
         T:  u8ToB64(new Uint8Array(Float32Array.from(epwT).buffer)),
         DN: u8ToB64(new Uint8Array(Float32Array.from(epwDN).buffer)),
         DH: u8ToB64(new Uint8Array(Float32Array.from(epwDH).buffer)),
-        WS: u8ToB64(new Uint8Array(Float32Array.from(epwWS).buffer))
+        WS: u8ToB64(new Uint8Array(Float32Array.from(epwWS).buffer)),
+        DP: epwDP.length>=8760 ? u8ToB64(new Uint8Array(Float32Array.from(epwDP).buffer)) : null
       } : null,
       zones: zones.map(z=>({
         id:z.id, name:z.name, color:z.color, volume:z.volume,
@@ -23795,7 +24100,9 @@ function _cargarProyectoData(proj){
       epwDN = dec(proj.epw.DN);
       epwDH = dec(proj.epw.DH);
       epwWS = dec(proj.epw.WS);
+      epwDP = proj.epw.DP ? dec(proj.epw.DP) : [];   // v11.0: puede faltar en proyectos antiguos
       epwMeta = proj.epw.meta || null;
+      if(epwMeta && isFinite(epwMeta.alt)) epwAlt = epwMeta.alt;
       if(epwMeta){
         if(isFinite(epwMeta.lat)) _latitude  = epwMeta.lat;
         if(isFinite(epwMeta.lon)) _longitude = epwMeta.lon;
@@ -24766,7 +25073,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v10.2
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.0
   </div>
 </div>
 <script>
@@ -26237,7 +26544,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v10.2</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.0</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
