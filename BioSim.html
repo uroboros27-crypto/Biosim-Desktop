@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v11.0</title>
+<title>BioSim v11.1</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4126,7 +4126,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.0</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.1</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5591,7 +5591,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.0 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.1 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -22997,6 +22997,110 @@ function calcularHVAC(){
   _renderHVAC();
 }
 
+// v11.1 — Informe HVAC en PDF. No se reutiliza exportTabPDF porque el
+// módulo vive en el panel lateral, no en una pestaña de informes, y su
+// contenido son controles de entrada mezclados con resultados: imprimir el
+// panel tal cual sacaría los campos de formulario. Aquí se compone un
+// documento limpio con los parámetros usados y la tabla de resultados.
+function exportarHVACPDF(){
+  if(!_hvacRes){ log('Calcula primero el módulo HVAC.','warn'); return; }
+  const R = _hvacRes, f = R.filas;
+  if(f.length === 0){ log('No hay zonas térmicas con resultados.','warn'); return; }
+  const T = k => f.reduce((a,x)=>a+x[k], 0);
+  const nf = (v,d=0) => v.toLocaleString('es',{minimumFractionDigits:d,maximumFractionDigits:d});
+  const areaT = T('area');
+  const term = T('kwhCal')+T('kwhRef')+T('kwhLat');
+  const elec = T('elecCal')+T('elecRef');
+
+  const filasHTML = f.map(x=>`
+    <tr style="border-bottom:1px solid #eef0f8">
+      <td style="padding:3px 7px;font-weight:600;white-space:nowrap">
+        <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${x.color};margin-right:5px"></span>${x.zona}</td>
+      <td style="padding:3px 7px;text-align:right;font-family:monospace">${nf(x.area,1)}</td>
+      <td style="padding:3px 7px;text-align:right;font-family:monospace">${nf(x.H)}</td>
+      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#c04010">${nf(x.kwCal,2)}</td>
+      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#2060c0">${nf(x.kwRef+x.kwLat,2)}</td>
+      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#c04010">${nf(x.kwhCal)}</td>
+      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#2060c0">${nf(x.kwhRef)}</td>
+      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#5090b0">${nf(x.kwhLat)}</td>
+      <td style="padding:3px 7px;text-align:right;font-family:monospace;font-weight:700">${nf(x.elecCal+x.elecRef)}</td>
+      <td style="padding:3px 7px;text-align:right;font-family:monospace;font-size:.9em;color:#778">${x.hCal} / ${x.hRef}</td>
+    </tr>`).join('');
+
+  const w = window.open('','_blank');
+  if(!w){ log('No se pudo abrir la ventana del informe. Permite las ventanas emergentes.','warn'); return; }
+  const sitio = epwMeta ? `${epwMeta.city || epwMeta.name || 'EPW'} · ${epwAlt||0} m` : 'sin clima';
+
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+  <title>Estimación de cargas HVAC — BioSim</title>
+  <style>
+    @page{size:A4 landscape;margin:14mm}
+    body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#223;margin:0;font-size:11px}
+    h1{font-size:19px;margin:0 0 3px;color:#0a2060}
+    table{width:100%;border-collapse:collapse;font-size:10px}
+    th{background:#eaf0ff;color:#0a2060;padding:4px 7px;text-align:right;font-size:9.5px}
+    th:first-child{text-align:left}
+  </style></head><body>
+  <h1>Estimación de cargas HVAC</h1>
+  <div style="color:#667;font-size:10px;border-bottom:2px solid #dce4f0;padding-bottom:6px;margin-bottom:9px">
+    Método de cargas ideales · ${sitio} · ${f.length} zona(s) térmica(s) ·
+    ${new Date().toLocaleString('es')}
+  </div>
+
+  <div style="background:#fff4e0;border:1px solid #e0b870;border-radius:4px;padding:7px 10px;
+       font-size:10px;line-height:1.5;margin-bottom:10px">
+    <b>Cálculo preliminar.</b> Estima la potencia necesaria para sostener la consigna suponiendo un sistema
+    sin pérdidas y de capacidad ilimitada. Linealiza la carga en torno al régimen libre
+    (Q&nbsp;=&nbsp;H·ΔT) en lugar de resolver un balance con control hora a hora; controla sobre temperatura
+    de aire, no operativa; y no modela recuperación de calor, economizador, free-cooling, deshumidificación
+    por sobreenfriamiento ni puesta en régimen. <b>No aplica factores de seguridad.</b>
+    Sirve para comparar alternativas de proyecto, no para seleccionar equipo.
+  </div>
+
+  <div style="display:flex;gap:16px;margin-bottom:10px;font-size:10px">
+    <div><b style="color:#0a2060">Consignas</b><br>
+      Calefacción ${R.tHeat} °C · Refrigeración ${R.tCool} °C<br>
+      HR objetivo ${R.rhSet}%${R.hayRocio?` → W = ${(R.Wsp*1000).toFixed(1)} g/kg`:''}<br>
+      ${R.soloOcup?'Solo horas ocupadas':'Las 8760 h del año'}</div>
+    <div><b style="color:#0a2060">Rendimiento</b><br>
+      COP calefacción ${R.copH}<br>COP refrigeración ${R.copC}</div>
+    <div><b style="color:#0a2060">Totales</b><br>
+      Demanda térmica <b>${nf(term)} kWh<sub>t</sub></b>${areaT>0?` · ${nf(term/areaT,1)} kWh/m²·año`:''}<br>
+      Consumo eléctrico <b>${nf(elec)} kWh<sub>e</sub></b>${areaT>0?` · ${nf(elec/areaT,1)} kWh/m²·año`:''}</div>
+  </div>
+
+  <table>
+    <tr><th>Zona</th><th>Área m²</th><th>H W/K</th><th>Pico cal. kW</th><th>Pico ref. kW</th>
+        <th>Calef. kWh</th><th>Refrig. kWh</th><th>Latente kWh</th><th>Eléctrico kWh</th><th>h cal/ref</th></tr>
+    ${filasHTML}
+    <tr style="background:#eaf0ff;font-weight:700">
+      <td style="padding:4px 7px">TOTAL</td>
+      <td style="padding:4px 7px;text-align:right;font-family:monospace">${nf(areaT,1)}</td>
+      <td></td><td></td><td></td>
+      <td style="padding:4px 7px;text-align:right;font-family:monospace;color:#c04010">${nf(T('kwhCal'))}</td>
+      <td style="padding:4px 7px;text-align:right;font-family:monospace;color:#2060c0">${nf(T('kwhRef'))}</td>
+      <td style="padding:4px 7px;text-align:right;font-family:monospace;color:#5090b0">${nf(T('kwhLat'))}</td>
+      <td style="padding:4px 7px;text-align:right;font-family:monospace">${nf(elec)}</td>
+      <td></td>
+    </tr>
+  </table>
+
+  <div style="font-size:9px;color:#667;line-height:1.5;margin-top:9px;border-top:1px solid #dce4f0;padding-top:6px">
+    <b>Formulación.</b> Carga sensible Q = H·(T_consigna − T_libre), con
+    H = ΣU·A (envolvente) + ΣY·A (masa térmica) + ṁ·Cp (ventilación e infiltración).
+    ${R.hayRocio
+      ? `Carga latente Q = ṁ·h_fg·(W_ext − W_consigna), con W_ext del punto de rocío del EPW,
+         solo en horas de refrigeración y con el aire exterior más húmedo que el interior.`
+      : `<b>Sin carga latente:</b> el clima cargado no incluye punto de rocío.`}
+    Consumo eléctrico = demanda térmica ÷ COP. La demanda térmica no depende del equipo; el consumo sí.
+    <br>BioSim · CIBSE Admittance Method
+  </div>
+  </body></html>`);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 320);
+  log('Informe HVAC generado. Usa «Guardar como PDF» en el diálogo de impresión.','ok');
+}
+
 function _renderHVAC(){
   const cont = document.getElementById('rHvacBody');
   if(!cont || !_hvacRes) return;
@@ -23035,6 +23139,11 @@ function _renderHVAC(){
       Sirve para <b>comparar alternativas de proyecto</b>, no para seleccionar equipo.
       No incluye factores de seguridad, recuperación de calor, free-cooling ni puesta en régimen,
       y controla sobre temperatura de aire, no operativa.
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;margin-bottom:7px">
+      <button class="btn btn-g btn-xs" onclick="exportarHVACPDF()"
+        title="Imprimir el informe HVAC: consignas, rendimiento del equipo y resultados por zona">⬇ PDF</button>
     </div>
 
     <div class="section-hdr">Consignas</div>
@@ -25073,7 +25182,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.0
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.1
   </div>
 </div>
 <script>
@@ -26544,7 +26653,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.0</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.1</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -26582,6 +26691,19 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Balance térmico por el <strong style="color:var(--text)">método de las admitancias</strong>
           (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">CIBSE Guide A 2015</span>) y confort adaptativo
           (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ASHRAE 55</span>), con análisis estacional e informes exportables a PDF.</li>
+        <li style="margin-bottom:7px">Modelo <strong style="color:var(--text)">multizona</strong> con particiones
+          interzonales acopladas térmicamente. Todos los informes se desglosan por zona y admiten
+          <strong style="color:var(--text)">filtrar las zonas</strong> que se muestran, con gráfica
+          independiente de confort por cada una.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Módulo HVAC por cargas ideales</strong>:
+          estimación preliminar de potencia pico y demanda anual sensible y latente, con consignas de
+          temperatura y humedad, y conversión a consumo eléctrico mediante COP. Ver sus limitaciones abajo.</li>
+        <li style="margin-bottom:7px">Zonas de sombra con <strong style="color:var(--text)">transmisividad τ</strong>
+          para vegetación, celosías, mallas y pérgolas, y factor de vista al cielo medido por obstrucción con
+          muestreo adaptativo (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">145 parches de Tregenza</span>).</li>
+        <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
+          fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
+          y por etiqueta, y plano de sección arrastrable.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Limitaciones conocidas</div>
@@ -26616,6 +26738,14 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">El muestreo de sombras usa del orden de 4 sensores por superficie; las superficies
           menores de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">3 m²</span> se resuelven con un único rayo, de modo que su
           sombreamiento es binario.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El módulo HVAC es una estimación
+          preliminar</strong>, no un dimensionamiento. Linealiza la carga en torno al régimen libre
+          (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Q = H·ΔT</span>) en lugar de resolver un balance con control hora a hora, controla
+          sobre temperatura de aire —el modelo es de un solo nodo y no separa la fracción radiante— y no
+          modela recuperación de calor, economizador, free-cooling, deshumidificación por sobreenfriamiento
+          ni puesta en régimen. No aplica factores de seguridad. La carga latente se calcula por consigna de
+          humedad, válido para estimar la carga pero no para conocer la humedad interior en régimen libre.
+          Sirve para <strong style="color:var(--text)">comparar alternativas</strong>, no para seleccionar equipo.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">No ha sido validada</strong> según
           <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ASHRAE 140</span> ni ningún otro protocolo de contraste. No debe usarse para
           certificación energética, verificación normativa ni justificación de cumplimiento.</li>
