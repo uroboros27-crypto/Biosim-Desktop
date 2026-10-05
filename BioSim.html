@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v10.0</title>
+<title>BioSim v10.2</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4126,7 +4126,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v10.0</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v10.2</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5585,7 +5585,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v10.0 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v10.2 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -20489,6 +20489,10 @@ function graficarPerfil(){
   const thermalZoneList=zones.filter(z=>z.thermal);
   results.forEach((zArr,zi)=>{
     if(zi>=thermalZoneList.length) return;
+    // v10.1: el filtro de zonas se había aplicado por error en la gráfica de
+    // Temporadas, que tiene un bucle casi idéntico, y no aquí. Por eso
+    // seleccionar zonas no surtía efecto en el perfil horario.
+    if(!_zonaEnInforme(zi)) return;
     const tz=thermalZoneList[zi];
     const col=tz?.color||zColors[zi%zColors.length];
     const colRgb=col.startsWith('#')
@@ -20736,17 +20740,25 @@ function _graficarConfortPorZona(limitsPerMonth, dias, meses, PAL){
     });
     const pctAnual = nTot ? (nOk/nTot*100) : 0;
 
+    // v10.1: el título va en su propio bloque de altura fija y el lienzo en
+    // otro independiente. Antes ambos compartían el contenedor con la clase
+    // .chart-w, cuya altura es calc(100% - 46px); al anidarlos, el canvas se
+    // expandía por encima del encabezado y el nombre de la zona quedaba
+    // pisado por las barras. Ahora no hay solape posible.
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'margin-top:14px';
+    wrap.style.cssText = 'margin:18px 0 6px;display:block';
     wrap.innerHTML = `
-      <div style="display:flex;align-items:baseline;gap:8px;font-size:.68rem;margin-bottom:3px;padding:0 4px">
-        <span style="width:11px;height:11px;border-radius:2px;background:${z.color};display:inline-block"></span>
+      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+           font-size:.68rem;padding:0 4px 6px;min-height:20px;line-height:1.5;
+           border-bottom:1px solid var(--border);margin-bottom:8px">
+        <span style="width:11px;height:11px;border-radius:2px;background:${z.color};
+              display:inline-block;flex-shrink:0;align-self:center"></span>
         <b style="color:var(--text)">${z.name}</b>
         <span style="color:var(--text3);font-size:.6rem">
           ${pctAnual.toFixed(1)}% dentro de la banda del 80% ·
           ${nTot} h ${mask?'ocupadas':'(sin horario de ocupación)'}</span>
       </div>
-      <div class="chart-w" style="height:170px"><canvas></canvas></div>`;
+      <div style="height:180px;position:relative"><canvas></canvas></div>`;
     cont.appendChild(wrap);
 
     const cv = wrap.querySelector('canvas');
@@ -20758,8 +20770,10 @@ function _graficarConfortPorZona(limitsPerMonth, dias, meses, PAL){
         {label:'Calor',   data:calor, backgroundColor:PAL.hot.bar,     borderColor:PAL.hot.border,     borderWidth:1, stack:'s'}
       ]},
       options:{ responsive:true, maintainAspectRatio:false,
+        layout:{padding:{top:6, bottom:2}},
         plugins:{
           legend:{display:false},
+          title:{display:false},
           tooltip:{callbacks:{label: it => `${it.dataset.label}: ${it.parsed.y.toFixed(1)}%`}}
         },
         scales:{
@@ -22692,11 +22706,19 @@ function _nZonasFiltradas(){
 }
 
 // Etiqueta del alcance activo, para rotular informes y nombres de archivo.
-function _alcanceInforme(){
+// Etiqueta del alcance activo.
+//
+// v10.2 — `corto` abrevia por encima de 4 zonas. La lista completa de
+// nombres sirve en el cuerpo del informe, pero llevada al título del PDF
+// —y de ahí al nombre del archivo— se desbordaba: con 10 zonas marcadas
+// salían 104 caracteres, que ningún gestor de archivos muestra entero.
+function _alcanceInforme(corto){
   const tz = _zonasTermicas();
   if(!_zonaFiltro || _zonaFiltro.size >= tz.length) return 'todas las zonas';
   const n = tz.filter(z=>_zonaFiltro.has(z.id));
   if(n.length === 1) return n[0].name;
+  // Hasta 4 caben sin estorbar; a partir de ahí, solo el recuento.
+  if(corto && n.length > 4) return `${n.length} de ${tz.length} zonas`;
   return `${n.length} de ${tz.length} zonas: ` + n.map(z=>z.name).join(', ');
 }
 
@@ -22777,7 +22799,7 @@ function _actualizarBotonFiltro(){
   document.querySelectorAll('.zf-btn').forEach(b=>{
     b.textContent = _zonaFiltro ? `🔍 ${n}/${tot} zonas` : '🔍 Zonas';
     b.style.color = _zonaFiltro ? 'var(--accent)' : '';
-    b.title = 'Informes mostrando: ' + _alcanceInforme() + '. Pulsa para cambiar.';
+    b.title = 'Informes mostrando: ' + _alcanceInforme() + '. Pulsa para cambiar.';   // tooltip: lista completa
   });
 }
 
@@ -24462,8 +24484,18 @@ function exportTabPDF(tabId, title){
 
   // v9.4: si hay filtro de zonas activo, el título del PDF lo declara. Sin
   // esto, un informe de dos zonas sería indistinguible de uno completo.
-  if(typeof _zonaFiltro !== 'undefined' && _zonaFiltro && typeof _alcanceInforme === 'function'){
-    title = title + ' — ' + _alcanceInforme();
+  //
+  // v10.1: el rótulo solo se añade en las pestañas cuyo contenido depende de
+  // las zonas térmicas. La RADIACIÓN SOLAR INCIDENTE se calcula superficie a
+  // superficie sobre toda la envolvente exterior, con independencia de la
+  // zonificación térmica, así que arrastrar el filtro a su título decía algo
+  // falso: el mapa de falso color y la tabla seguían siendo del modelo
+  // completo. Lo mismo vale para cualquier informe de geometría.
+  const _TABS_POR_ZONA = ['bChart','bPerfil','bConf','bStat','bReport','bSeason'];
+  if(_TABS_POR_ZONA.includes(tabId) &&
+     typeof _zonaFiltro !== 'undefined' && _zonaFiltro &&
+     typeof _alcanceInforme === 'function'){
+    title = title + ' — ' + _alcanceInforme(true);   // v10.2: abreviado
   }
 
   // v2.9: Generar SVG vectorial de cada Chart.js detectado.
@@ -24734,7 +24766,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v10.0
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v10.2
   </div>
 </div>
 <script>
@@ -26205,7 +26237,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v10.0</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v10.2</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
