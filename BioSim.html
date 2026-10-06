@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v11.2</title>
+<title>BioSim v11.3</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4126,7 +4126,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.2</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.3</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5591,7 +5591,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.2 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.3 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -20774,7 +20774,7 @@ function _graficarConfortPorZona(limitsPerMonth, dias, meses, PAL){
                    `${nTot} h ${mask?'ocupadas':'(sin horario)'}`;
     const wrap = document.createElement('div');
     wrap.style.cssText = 'margin:14px 0 6px;display:block';
-    wrap.innerHTML = `<div style="height:230px;position:relative">
+    wrap.innerHTML = `<div style="height:190px;position:relative">
       <canvas id="cConfZ${zi}"></canvas></div>`;
     cont.appendChild(wrap);
 
@@ -20792,9 +20792,13 @@ function _graficarConfortPorZona(limitsPerMonth, dias, meses, PAL){
           legend:{display:true, position:'bottom',
             labels:{boxWidth:10, boxHeight:10, padding:8,
                     color:'#7a8aa8', font:{size:9}}},
-          title:{display:true, text:titulo, align:'start',
-                 color:'#7a8aa8', font:{size:11, weight:'600'},
-                 padding:{top:2, bottom:8}},
+          // v11.3: el título va al margen IZQUIERDO, girado y leyéndose de
+          // abajo hacia arriba. Apiladas, con el rótulo arriba el hueco
+          // superior era mayor que el que lo separaba de la gráfica previa y
+          // se leía como si perteneciera a la anterior.
+          title:{display:true, text:titulo, position:'left',
+                 color:'#7a8aa8', font:{size:10, weight:'600'},
+                 padding:{top:4, bottom:4}},
           tooltip:{callbacks:{label: it => `${it.dataset.label}: ${it.parsed.y.toFixed(1)}%`}}
         },
         scales:{
@@ -24538,7 +24542,19 @@ function chartToSVG(chartInstance, opts){
   opts = opts || {};
   const W = opts.width  || 720;
   const H = opts.height || 320;  // un poco más alto para acomodar la leyenda multi-línea
-  const margin = {top:36, right:14, bottom:62, left:48};
+  // v11.3 — El margen se adapta a dónde va el título.
+  //
+  // Con el título ARRIBA, en una secuencia de gráficas apiladas el hueco
+  // que queda por encima del rótulo acaba siendo mayor que el que lo separa
+  // de la gráfica anterior, de modo que el ojo lo asocia a la gráfica
+  // equivocada. Puesto en el margen IZQUIERDO y girado, el título queda
+  // inequívocamente pegado a su propia gráfica y además libera altura.
+  const _cfgT = (chartInstance && chartInstance.config && chartInstance.config.options
+                 && chartInstance.config.options.plugins && chartInstance.config.options.plugins.title) || {};
+  const _titleLeft = _cfgT.position === 'left';
+  const margin = _titleLeft
+    ? {top:12, right:14, bottom:56, left:66}
+    : {top:36, right:14, bottom:62, left:48};
   const innerW = W - margin.left - margin.right;
   const innerH = H - margin.top - margin.bottom;
 
@@ -24591,7 +24607,15 @@ function chartToSVG(chartInstance, opts){
 
   // Título
   if(title){
-    parts.push(`<text x="${W/2}" y="14" text-anchor="middle" font-size="10" font-weight="700" fill="#33405a">${escapeXml(title)}</text>`);
+    if(_titleLeft){
+      // Girado -90°: el texto se lee de abajo hacia arriba, centrado sobre
+      // el alto del área de trazado y pegado al borde izquierdo.
+      const cy = margin.top + innerH/2;
+      parts.push(`<text x="14" y="${cy}" text-anchor="middle" font-size="9.5" font-weight="700" ` +
+                 `fill="#33405a" transform="rotate(-90, 14, ${cy})">${escapeXml(title)}</text>`);
+    } else {
+      parts.push(`<text x="${W/2}" y="14" text-anchor="middle" font-size="10" font-weight="700" fill="#33405a">${escapeXml(title)}</text>`);
+    }
   }
 
   // Marco
@@ -24890,7 +24914,13 @@ function _chartsToSVG(rootEl){
       // Ancho/alto proporcionales al canvas para coherencia visual.
       // Altura mínima 320px para acomodar leyenda multi-línea sin recortes.
       const sw = Math.min(720, Math.max(480, w));
-      const sh = Math.max(320, sw * (h/w));
+      // v11.3: con el título en el margen izquierdo no hace falta reservar
+      // altura arriba, así que el recuadro puede ser más bajo. El suelo de
+      // 320 px hacía que gráficas apiladas desbordaran la página y el área
+      // de trazado saliera cortada.
+      const tp = inst.config?.options?.plugins?.title?.position;
+      const minH = (tp === 'left') ? 230 : 320;
+      const sh = Math.max(minH, Math.min(420, sw * (h/w)));
       map[cv.id] = chartToSVG(inst, {width: sw, height: sh});
     }
   });
@@ -25186,7 +25216,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.2
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.3
   </div>
 </div>
 <script>
@@ -26657,7 +26687,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.2</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.3</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
