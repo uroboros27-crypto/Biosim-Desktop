@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v11.1</title>
+<title>BioSim v11.2</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4126,7 +4126,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.1</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.2</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5591,7 +5591,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.1 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.2 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -20757,25 +20757,25 @@ function _graficarConfortPorZona(limitsPerMonth, dias, meses, PAL){
     });
     const pctAnual = nTot ? (nOk/nTot*100) : 0;
 
-    // v10.1: el título va en su propio bloque de altura fija y el lienzo en
-    // otro independiente. Antes ambos compartían el contenedor con la clase
-    // .chart-w, cuya altura es calc(100% - 46px); al anidarlos, el canvas se
-    // expandía por encima del encabezado y el nombre de la zona quedaba
-    // pisado por las barras. Ahora no hay solape posible.
+    // v11.2: el encabezado va DENTRO del gráfico, como título del plugin de
+    // Chart.js, no en un div aparte.
+    //
+    // Motivo: el exportador a PDF sustituye cada <canvas> por un SVG generado
+    // con chartToSVG(), que solo conoce lo que hay en la configuración del
+    // gráfico. Un título en un div hermano no viaja al SVG, así que en el
+    // informe impreso las gráficas por zona salían sin nombre y no había
+    // forma de saber a qué recinto correspondía cada una. Puesto en el
+    // plugin `title`, Chart.js le reserva espacio —no puede solaparse— y el
+    // exportador lo dibuja dentro del SVG.
+    //
+    // La leyenda también se activa: sin ella, en el PDF el verde y el naranja
+    // no significan nada.
+    const titulo = `${z.name} · ${pctAnual.toFixed(1)}% en banda 80% · ` +
+                   `${nTot} h ${mask?'ocupadas':'(sin horario)'}`;
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'margin:18px 0 6px;display:block';
-    wrap.innerHTML = `
-      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
-           font-size:.68rem;padding:0 4px 6px;min-height:20px;line-height:1.5;
-           border-bottom:1px solid var(--border);margin-bottom:8px">
-        <span style="width:11px;height:11px;border-radius:2px;background:${z.color};
-              display:inline-block;flex-shrink:0;align-self:center"></span>
-        <b style="color:var(--text)">${z.name}</b>
-        <span style="color:var(--text3);font-size:.6rem">
-          ${pctAnual.toFixed(1)}% dentro de la banda del 80% ·
-          ${nTot} h ${mask?'ocupadas':'(sin horario de ocupación)'}</span>
-      </div>
-      <div style="height:180px;position:relative"><canvas></canvas></div>`;
+    wrap.style.cssText = 'margin:14px 0 6px;display:block';
+    wrap.innerHTML = `<div style="height:230px;position:relative">
+      <canvas id="cConfZ${zi}"></canvas></div>`;
     cont.appendChild(wrap);
 
     const cv = wrap.querySelector('canvas');
@@ -20787,10 +20787,14 @@ function _graficarConfortPorZona(limitsPerMonth, dias, meses, PAL){
         {label:'Calor',   data:calor, backgroundColor:PAL.hot.bar,     borderColor:PAL.hot.border,     borderWidth:1, stack:'s'}
       ]},
       options:{ responsive:true, maintainAspectRatio:false,
-        layout:{padding:{top:6, bottom:2}},
+        layout:{padding:{top:4, bottom:2}},
         plugins:{
-          legend:{display:false},
-          title:{display:false},
+          legend:{display:true, position:'bottom',
+            labels:{boxWidth:10, boxHeight:10, padding:8,
+                    color:'#7a8aa8', font:{size:9}}},
+          title:{display:true, text:titulo, align:'start',
+                 color:'#7a8aa8', font:{size:11, weight:'600'},
+                 padding:{top:2, bottom:8}},
           tooltip:{callbacks:{label: it => `${it.dataset.label}: ${it.parsed.y.toFixed(1)}%`}}
         },
         scales:{
@@ -25182,7 +25186,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.1
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.2
   </div>
 </div>
 <script>
@@ -26653,7 +26657,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.1</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.2</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
