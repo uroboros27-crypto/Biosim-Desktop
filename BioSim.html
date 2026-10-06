@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v11.3</title>
+<title>BioSim v11.4</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4126,7 +4126,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.3</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.4</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5591,7 +5591,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.3 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.4 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -20997,7 +20997,13 @@ function graficarC(){
 
   const tbl=document.createElement('div');
   tbl.id='confortTbl';
-  tbl.style.cssText='font-size:.6rem;font-family:JetBrains Mono,monospace;margin-top:8px;overflow-x:auto;border-radius:7px;overflow:hidden;border:1px solid rgba(80,140,220,0.22)';
+  // v11.4: `overflow:hidden` iba DESPUÉS de `overflow-x:auto` y lo anulaba,
+  // así que la tabla no se desplazaba: se recortaba, y la última columna
+  // («% EN 90%») quedaba cortada por el borde. Ahora el redondeo de esquinas
+  // se consigue con border-radius sin necesidad de recortar el contenido.
+  tbl.style.cssText='font-size:.6rem;font-family:JetBrains Mono,monospace;margin-top:8px;'+
+    'overflow-x:auto;overflow-y:visible;border-radius:7px;'+
+    'border:1px solid rgba(80,140,220,0.22);max-width:100%';
 
   const thStyle='padding:5px 8px;text-align:center;font-weight:700;font-size:.58rem;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap';
 
@@ -25134,16 +25140,27 @@ h1{
 }
 
 /* ── TABLAS ───────────────────────────────────────── */
+/* v11.4 — Las tablas deben salir ENTERAS. Antes heredaban del visor un
+   contenedor con overflow:hidden y la última columna se perdía por el borde
+   de la página. Tres medidas: anular cualquier recorte heredado, repartir
+   el ancho con table-layout:fixed para que ninguna columna se salga, y
+   permitir que el texto se parta en vez de empujar la tabla a lo ancho. */
+div[style*="overflow"]{ overflow: visible !important; }
 table{
   border-collapse: collapse;
   width: 100%;
+  max-width: 100%;
   margin-bottom: 4px;
-  font-size: 8pt;
+  font-size: 7.5pt;
 }
 th, td{
   border: 1px solid #dce4f0;
-  padding: 3px 6px;
+  padding: 3px 4px;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
+/* La primera columna suele ser el nombre (mes o zona): no partirla */
+th:first-child, td:first-child{ word-break: normal; }
 th{
   background: #eef0f8 !important;
   font-weight: 600;
@@ -25216,7 +25233,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.3
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.4
   </div>
 </div>
 <script>
@@ -26687,7 +26704,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.3</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.4</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
