@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v11.5</title>
+<title>BioSim v11.6</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4126,7 +4126,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.5</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.6</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -4155,6 +4155,7 @@ canvas#cv{display:block;}
       <a onclick="colorMat()">🧱 Colorear por Material</a>
       <hr>
       <a onclick="dividirSuperficieSeleccion()" title="Separa en superficies independientes los paños de una superficie que quedaron fundidos al importar. Útil cuando dos faldones de cubierta o dos paños de muro separados por una línea se seleccionan juntos.">✂ Dividir superficie seleccionada…</a>
+      <a onclick="dividirCoplanaresSeleccion()" title="Recupera ventanas y puertas de una fachada que llegó como una sola superficie. Corta por las aristas interiores que son horizontales o verticales dentro del plano de la cara: dinteles, antepechos y jambas. Para archivos sin aristas «l», grupos ni materiales distintos.">⊞ Dividir caras coplanares (vanos)</a>
       <hr>
       <a onclick="toggleNormalsViz()" title="Muestra una flecha por superficie en la dirección de su normal. Verde = hacia fuera del modelo, naranja = hacia dentro.">➤ Ver normales</a>
       <a onclick="invertirNormalesSeleccion()" title="Invierte la normal de las superficies seleccionadas. La normal decide qué caras reciben sol, el factor de vista al cielo y la clasificación cubierta/losa.">⇅ Invertir normal de la selección</a>
@@ -5591,7 +5592,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.5 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.6 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -8702,7 +8703,28 @@ function areaLocal(geo){
 // sentencias «l» del OBJ contienen las aristas que el usuario dibujó en
 // SketchUp — y NO las diagonales que inventó el triangulador. Pasándolas
 // aquí, el flood-fill se detiene en ellas y las caras vuelven a separarse.
-function descomponerPorBordes(name, geo, hardEdgeDeg=30, hardEdges=null){
+// v11.6 — `op` (opcional): {rectas:bool, up:'y'|'z'}
+//
+// Tercer criterio de corte, para exportadores que NO escriben aristas «l»
+// ni separan por grupos o materiales (IngeTrazo, muchos conversores
+// IFC→OBJ, exportadores de BIM ligeros). En esos archivos una fachada con
+// ventanas llega como UNA triangulación plana soldada: los huecos no son
+// agujeros, son rectángulos coplanares rellenos con el mismo material, y
+// el contorno de cada ventana es una arista interior indistinguible de una
+// diagonal de triangulación por ángulo diedro —ambos valen 0°.
+//
+// Lo que sí las distingue es la DIRECCIÓN. En arquitectura el contorno de
+// un vano es horizontal o vertical dentro del plano de su muro (dinteles,
+// antepechos, jambas), mientras que una diagonal de triangulación es
+// oblicua. Marcando como frontera toda arista interior que sea recta en el
+// plano de la cara, el flood-fill se detiene en los vanos y los devuelve
+// como superficies propias.
+//
+// Es una heurística, no una lectura del archivo: puede partir de más un
+// muro cuyo triangulador haya metido aristas rectas auxiliares. El reparto
+// es inocuo —las partes conservan zona, capa y construcción, y las áreas
+// suman igual— pero por eso la opción es explícita y no automática.
+function descomponerPorBordes(name, geo, hardEdgeDeg=30, hardEdges=null, op=null){
   // ── 1. Convertir a no-indexada para simplicidad ──────────────────
   const src = geo.index ? geo.toNonIndexed() : geo.clone();
   const pos  = src.attributes.position;
@@ -8713,7 +8735,7 @@ function descomponerPorBordes(name, geo, hardEdgeDeg=30, hardEdges=null){
   // para evitar bloquear el hilo principal (>80k triángulos ≈ 10s sin yield)
   if(nTri > 80000){
     log(`Malla grande (${nTri} tri.) — usando descomposición simplificada…`,'warn');
-    return descomponerPorBordesSimple(name, src, hardEdgeDeg);
+    return descomponerPorBordesSimple(name, src, hardEdgeDeg);   // sin corte por aristas rectas
   }
 
   // ── 2. Calcular normal de cada triángulo ─────────────────────────
@@ -8763,14 +8785,61 @@ function descomponerPorBordes(name, geo, hardEdgeDeg=30, hardEdges=null){
     if(hardSet.size === 0) hardSet = null;
   }
 
+  // v11.6: el corte por aristas rectas necesita la dirección de la arista,
+  // así que se guardan sus extremos junto al mapa de adyacencia.
+  const cortarRectas = !!(op && op.rectas);
+  const edgeVerts = cortarRectas ? new Map() : null;
+
   const edgeMap = new Map();
   for(let t=0; t<nTri; t++){
     for(let e=0; e<3; e++){
       const ia = t*3+e, ib = t*3+(e+1)%3;
       const k = edgeKey(ia, ib);
-      if(!edgeMap.has(k)) edgeMap.set(k,[]);
+      if(!edgeMap.has(k)){ edgeMap.set(k,[]); if(edgeVerts) edgeVerts.set(k,[ia,ib]); }
       edgeMap.get(k).push(t);
     }
+  }
+
+  // ── v11.6: ¿es la arista RECTA dentro del plano de la cara? ───────
+  // Recta = horizontal, o vertical, en el plano. El marco se deriva del
+  // propio plano de la cara, así que la prueba no depende de la
+  // orientación de la fachada: vale igual para un muro a 37° de azimut.
+  const _UP = (op && op.up === 'z') ? new THREE.Vector3(0,0,1)
+                                    : new THREE.Vector3(0,1,0);
+  const _AX1 = new THREE.Vector3(1,0,0);
+  const _AX2 = (op && op.up === 'z') ? new THREE.Vector3(0,1,0)
+                                     : new THREE.Vector3(0,0,1);
+  // 0.5° de tolerancia angular: suficiente para absorber el redondeo a 6
+  // decimales de los exportadores, demasiado estrecho para capturar una
+  // diagonal de triangulación.
+  const TOL_RECTA = Math.sin(0.5 * Math.PI/180);
+  // El corte solo se aplica entre caras REALMENTE coplanares. Así una
+  // malla curva o facetada (una bóveda, un terreno) queda intacta: sus
+  // pliegues suaves no son vanos.
+  const COS_COPLANAR = Math.cos(0.5 * Math.PI/180);
+  const _eDir = new THREE.Vector3(), _uDir = new THREE.Vector3();
+
+  function _esAristaRecta(k, n){
+    const ev = edgeVerts.get(k); if(!ev) return false;
+    const ia = ev[0], ib = ev[1];
+    _eDir.set(pos.getX(ib)-pos.getX(ia),
+              pos.getY(ib)-pos.getY(ia),
+              pos.getZ(ib)-pos.getZ(ia));
+    const L = _eDir.length();
+    if(L < 1e-9) return false;
+    _eDir.divideScalar(L);
+    _uDir.crossVectors(_UP, n);
+    if(_uDir.lengthSq() < 1e-8){
+      // Cara horizontal (losa, cubierta plana): no tiene vertical propia,
+      // así que la referencia son los dos ejes horizontales del mundo.
+      return Math.abs(_eDir.dot(_AX1)) < TOL_RECTA ||
+             Math.abs(_eDir.dot(_AX2)) < TOL_RECTA;
+    }
+    _uDir.normalize();
+    // Horizontal en el plano ⇔ perpendicular a la vertical del mundo.
+    // Vertical en el plano   ⇔ perpendicular a la horizontal del plano.
+    return Math.abs(_eDir.dot(_UP))  < TOL_RECTA ||
+           Math.abs(_eDir.dot(_uDir)) < TOL_RECTA;
   }
 
   // ── 4. Para cada triángulo, listar vecinos accesibles ─────────────
@@ -8778,7 +8847,7 @@ function descomponerPorBordes(name, geo, hardEdgeDeg=30, hardEdges=null){
   const adj = new Array(nTri);
   for(let t=0; t<nTri; t++) adj[t]=[];
 
-  let cortesPorArista = 0;
+  let cortesPorArista = 0, cortesPorRecta = 0;
   edgeMap.forEach((tris, k)=>{
     if(tris.length<2) return;
     // v8.2: una arista real del modelo separa superficies aunque sean
@@ -8788,14 +8857,19 @@ function descomponerPorBordes(name, geo, hardEdgeDeg=30, hardEdges=null){
       for(let j=i+1; j<tris.length; j++){
         const ti=tris[i], tj=tris[j];
         const dot = triNormals[ti].dot(triNormals[tj]);
-        if(dot >= cosHard){
-          adj[ti].push(tj);
-          adj[tj].push(ti);
+        if(dot < cosHard) continue;
+        // v11.6: entre caras coplanares, una arista recta en el plano se
+        // trata como contorno de vano y corta.
+        if(cortarRectas && dot >= COS_COPLANAR && _esAristaRecta(k, triNormals[ti])){
+          cortesPorRecta++; continue;
         }
+        adj[ti].push(tj);
+        adj[tj].push(ti);
       }
     }
   });
   if(cortesPorArista > 0) _dpbCortes += cortesPorArista;
+  if(cortesPorRecta  > 0) _dpbRectas += cortesPorRecta;
 
   // ── 5. Flood-fill para encontrar componentes conectadas ───────────
   const groupOf = new Int32Array(nTri).fill(-1);
@@ -8855,6 +8929,9 @@ function descomponerPorBordesSimple(name, src, hardEdgeDeg){
 }
 
 // Construir geometrías a partir de grupos de triángulos
+// v11.6: cuántos grupos sin área se descartaron (diagnóstico de archivo).
+let _geoGruposNulos = 0;
+
 function _buildGeoGroups(name, pos, triNormals, groups){
   const HINTS=['E','O','N','S','Techo','Piso'];
   const AXES=[
@@ -8863,6 +8940,23 @@ function _buildGeoGroups(name, pos, triNormals, groups){
     new THREE.Vector3(0,1,0),new THREE.Vector3(0,-1,0)
   ];
   const result=[];
+  // v11.6: descartar ASTILLAS — grupos cuya área es despreciable frente a
+  // su propia extensión. Dos patologías habituales de los exportadores:
+  // triángulos colapsados sobre una recta (área exactamente 0) y, más
+  // insidioso, paños partidos por redondeo —un mismo muro escrito con dos
+  // valores que difieren en 0.1 mm genera una astilla de 5 m de alto y
+  // 0.12 mm de ancho—. Fundidas con un paño mayor pasaban inadvertidas;
+  // al separar caras coplanares quedan aisladas y, como registrar() impone
+  // un área mínima de 0.01 m² por superficie, se convertirían en
+  // superficies fantasma: invisibles, seleccionables por accidente y
+  // sumando área falsa en los balances.
+  //
+  // El criterio es la ESBELTEZ, no el área: se compara el área del grupo
+  // con el cuadrado de su propia diagonal. Así es independiente de la
+  // escala (sirve igual en metros que en milímetros) y del tamaño del
+  // modelo. Una astilla da 1e-5; una ventana de 0.6 m², 0.35.
+  const ESBELTEZ_MIN = 1e-4;
+  const _bbG = new THREE.Box3(), _szG = new THREE.Vector3();
   groups.forEach((tris,gi)=>{
     if(tris.length===0) return;
     const verts=new Float32Array(tris.length*9);
@@ -8878,6 +8972,12 @@ function _buildGeoGroups(name, pos, triNormals, groups){
     avgNormal.normalize();
     const geoG=new THREE.BufferGeometry();
     geoG.setAttribute('position',new THREE.BufferAttribute(verts,3));
+    geoG.computeBoundingBox();
+    _bbG.copy(geoG.boundingBox); _bbG.getSize(_szG);
+    const diag2 = _szG.lengthSq();
+    if(diag2 <= 0 || areaLocal(geoG) < ESBELTEZ_MIN * diag2){
+      geoG.dispose(); _geoGruposNulos++; return;
+    }
     geoG.computeVertexNormals();
     let bestHint=`S${gi+1}`,bestDot=-2;
     AXES.forEach((ax,ai)=>{ const d=ax.dot(avgNormal); if(d>bestDot){bestDot=d;bestHint=HINTS[ai];} });
@@ -8936,6 +9036,93 @@ function _crearSuperficieDesde(geo, nombre, plantilla, root){
   surfaces.push(ns);
   if(typeof aplicarColorMaterial === 'function') aplicarColorMaterial(ns);
   return ns;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// ⊞  DIVIDIR CARAS COPLANARES — RECUPERACIÓN DE VANOS (v11.6)
+// ═══════════════════════════════════════════════════════════════════════
+// Hermano de dividirSuperficieSeleccion(), para el caso que el umbral
+// angular no puede resolver: una fachada cuyas ventanas y puertas no son
+// agujeros sino rectángulos COPLANARES rellenos con el mismo material.
+// Entre ellos y el muro el ángulo diedro es exactamente 0°, así que
+// ningún umbral los separa; lo único que los distingue es que su contorno
+// es recto en el plano de la cara.
+//
+// Esto ocurre con exportadores que no escriben aristas «l» ni separan por
+// grupos o materiales. Si el archivo SÍ trae esas señales, usa la
+// importación normal: leer el archivo siempre es mejor que deducirlo.
+function dividirCoplanaresSeleccion(){
+  const {editable, locked} = _splitSelByLock();
+  if(editable.length === 0){
+    log(sel.size === 0
+      ? 'Selecciona una o más superficies (o usa Selección → Todo) para recuperar sus vanos.'
+      : '🔒 Las superficies seleccionadas están en zonas bloqueadas.', 'warn');
+    return;
+  }
+
+  _undoPush();   // estado ANTES del cambio
+  const rectasIni = _dpbRectas;
+  let divididas = 0, nuevas = 0, intactas = 0;
+
+  editable.forEach(s => {
+    if(!s.mesh || !s.mesh.geometry){ intactas++; return; }
+    // Aquí la geometría YA está en coordenadas de mundo de BioSim, que es
+    // Y-up por definición: no hay conversión de ejes pendiente.
+    const g = s.mesh.geometry.clone();
+    s.mesh.updateMatrixWorld();
+    g.applyMatrix4(s.mesh.matrixWorld);
+
+    let partes = [];
+    try{
+      partes = descomponerPorBordes(s.name, g, getEdgeAngle(), null,
+                                    {rectas:true, up:'y'}) || [];
+    }catch(e){ partes = []; }
+    g.dispose();
+
+    if(partes.length <= 1){ intactas++; return; }
+
+    const plantilla = {
+      zoneId: s.zoneId, layerId: s.layerId, tag: s.tag,
+      partition: s.partition, neighborZoneId: s.neighborZoneId,
+      exterior: s.exterior, groundContact: s.groundContact,
+      normalFlip: s.normalFlip,
+      layers: s.layers ? s.layers.map(l => ({matId:l.matId, e:l.e})) : null
+    };
+
+    const idx  = surfaces.indexOf(s);
+    const root = getOrCreateRoot();
+    if(s.mesh.parent) s.mesh.parent.remove(s.mesh);
+    if(s.mesh.geometry) s.mesh.geometry.dispose();
+    surfaces.splice(idx, 1);
+    sel.delete(s.id);
+
+    // Las partes se ordenan de mayor a menor área: así el paño opaco queda
+    // como «·1» y los vanos detrás, que es el orden en que se revisan.
+    partes.sort((a,b)=> areaLocal(b.geo) - areaLocal(a.geo));
+    partes.forEach((p, i) => {
+      const ns = _crearSuperficieDesde(p.geo, `${s.name}·${i+1}`, plantilla, root);
+      if(ns){ sel.add(ns.id); nuevas++; }
+    });
+    divididas++;
+  });
+
+  if(divididas === 0){
+    log('Ninguna superficie se dividió: las caras seleccionadas no tienen ' +
+        'aristas interiores rectas. Si el modelo venía de SketchUp, vuelve a ' +
+        'exportarlo marcando «Exportar aristas», que es un dato real del ' +
+        'archivo y no una deducción.', 'warn');
+    return;
+  }
+
+  colorZona(); renderZoneTree(); updateSelVis(); updateStatus();
+  invalidateSnapCache(); invalidateShadowCache(); invalidateSVFCache();
+  _refreshPropsPanel();
+  log(`${divididas} superficie(s) divididas en ${nuevas} partes por ` +
+      `${_dpbRectas - rectasIni} arista(s) recta(s)` +
+      (intactas ? ` · ${intactas} sin aristas rectas interiores` : '') +
+      (locked.length ? ` · 🔒 ${locked.length} bloqueada(s)` : '') +
+      '. Asigna ahora el acristalamiento a los vanos y recalcula sombras.', 'ok');
 }
 
 function dividirSuperficieSeleccion(anguloDeg){
@@ -9015,11 +9202,13 @@ function dividirSuperficieSeleccion(anguloDeg){
 // informar al usuario de que la opción «Exportar aristas» está surtiendo
 // efecto (o de que el archivo no las trae).
 let _dpbCortes = 0;
+// v11.6: cortes aplicados por aristas rectas entre caras coplanares.
+let _dpbRectas = 0;
 
-function descomponerPorNormales(name, geo, angleTolDeg, hardEdges){
+function descomponerPorNormales(name, geo, angleTolDeg, hardEdges, op){
   // Redirigir al algoritmo de flood-fill por bordes
   const ang = angleTolDeg!==undefined ? angleTolDeg : getEdgeAngle();
-  return descomponerPorBordes(name, geo, ang, hardEdges);
+  return descomponerPorBordes(name, geo, ang, hardEdges, op);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -9416,12 +9605,21 @@ async function _addImportPreScan(p){
   const {ext, buf} = p;
   if(ext === 'obj'){
     const verts = [];
+    // v11.6: se cuentan también las aristas «l», los grupos y los materiales.
+    // Son las tres señales con las que BioSim puede separar caras coplanares;
+    // si el archivo no trae ninguna, conviene ofrecer el corte geométrico.
+    let nL = 0, nG = 0; const mats = new Set();
     buf.split('\n').forEach(raw=>{
       const line = raw.trim(); if(!line||line[0]==='#') return;
       const parts = line.split(/\s+/);
       if(parts[0]==='v') verts.push(+parts[1]||0, +parts[2]||0, +parts[3]||0);
+      else if(parts[0]==='l') nL++;
+      else if(parts[0]==='g' || parts[0]==='o') nG++;
+      else if(parts[0]==='usemtl') mats.add(parts[1]||'');
     });
-    return _bboxFromFlat(verts);
+    const bb = _bboxFromFlat(verts);
+    bb.señales = { aristas:nL, grupos:nG, materiales:mats.size };
+    return bb;
   }
   if(ext === 'stl'){
     let positions;
@@ -9483,7 +9681,31 @@ function _bboxFromFlat(arr){
     if(y<minY)minY=y; if(y>maxY)maxY=y;
     if(z<minZ)minZ=z; if(z>maxZ)maxZ=z;
   }
-  return {min:{x:minX,y:minY,z:minZ}, max:{x:maxX,y:maxY,z:maxZ}};
+  const bb = {min:{x:minX,y:minY,z:minZ}, max:{x:maxX,y:maxY,z:maxZ}};
+
+  // v11.6 — Estadística por eje para deducir cuál es el VERTICAL.
+  // El plano del suelo deja una firma inconfundible: el eje vertical es el
+  // único que arranca en cero (el modelador apoya el edificio en el nivel 0)
+  // y el único con muchos más vértices abajo que arriba (la losa está
+  // triangulada; la cubierta tiene bastantes menos puntos). Esa asimetría es
+  // mucho más fiable que comparar proporciones, porque no supone nada sobre
+  // la forma del edificio.
+  const mn=[minX,minY,minZ], mx=[maxX,maxY,maxZ];
+  const nMin=[0,0,0], nMax=[0,0,0], tol=[0,0,0];
+  for(let a=0;a<3;a++) tol[a] = Math.max(1e-6, (mx[a]-mn[a])*1e-4);
+  for(let i=0;i<arr.length;i+=3){
+    for(let a=0;a<3;a++){
+      const v=arr[i+a];
+      if(Math.abs(v-mn[a])<tol[a]) nMin[a]++;
+      if(Math.abs(v-mx[a])<tol[a]) nMax[a]++;
+    }
+  }
+  bb.ejes = [0,1,2].map(a=>({
+    min:mn[a], max:mx[a], nMin:nMin[a], nMax:nMax[a],
+    enCero: Math.abs(mn[a]) < tol[a],
+    pesoAbajo: nMin[a] / Math.max(1, nMax[a])
+  }));
+  return bb;
 }
 
 function _ensureGLTFLoader(){
@@ -9501,6 +9723,43 @@ function _ensureGLTFLoader(){
     // y esa petición sólo producía una espera de 8 s y un error confuso.
     reject(new Error('GLTFLoader embebido no disponible — archivo HTML corrupto o incompleto'));
   });
+}
+
+
+// v11.6 — Bloque común a los dos diálogos de importación: la casilla de
+// separación de caras coplanares por aristas rectas.
+//
+// Se propone marcada solo cuando el archivo no trae NINGUNA de las tres
+// señales con las que BioSim ya sabe separar caras (aristas «l», grupos,
+// varios materiales). Si el archivo sí las trae —un OBJ de SketchUp
+// exportado con «Exportar aristas»— esas señales son lectura directa del
+// modelo y siempre mandan sobre una heurística geométrica.
+function _bloqueRectas(bbox, idChk){
+  const sg = (bbox && bbox.señales) || null;
+  const sinSenales = !sg || (sg.aristas === 0 && sg.grupos <= 1 && sg.materiales <= 1);
+  const diag = sg
+    ? `El archivo trae <b>${sg.aristas}</b> arista(s) «l», <b>${sg.grupos}</b> grupo(s) y <b>${sg.materiales}</b> material(es).`
+    : 'Este formato no transporta aristas ni grupos.';
+  const nota = sinSenales
+    ? `<span style="color:#b03000;font-weight:600">Nada en el archivo identifica los vanos</span>, así que sin esta opción cada fachada entrará como una sola superficie opaca y no podrás asignar acristalamientos.`
+    : `El archivo ya trae información de caras; esta opción solo hace falta si aun así ves fachadas fundidas.`;
+  return `
+      <div style="background:${sinSenales?'#fff6e8':'#f6f8fa'};border:1px solid ${sinSenales?'#f0c890':'#e0e4ec'};border-radius:5px;padding:7px 10px;margin-bottom:10px;font-size:.64rem;color:#557;line-height:1.55">
+        <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;font-weight:600">
+          <input type="checkbox" id="${idChk}" ${sinSenales?'checked':''} style="margin-top:2px;cursor:pointer">
+          <span>Separar caras coplanares por aristas rectas (ventanas y puertas)
+            <span style="display:block;font-weight:400;color:#667;margin-top:2px">
+              ${diag}<br>${nota}<br>
+              Corta allí donde una arista interior es horizontal o vertical dentro
+              del plano de su cara —dinteles, antepechos y jambas— y deja pasar las
+              diagonales de triangulación. Es una heurística: puede partir de más un
+              muro, lo que es inocuo (las partes heredan zona y construcción, y las
+              áreas suman igual). Reversible desde
+              <i>Modelo → Dividir caras coplanares</i>.
+            </span>
+          </span>
+        </label>
+      </div>`;
 }
 
 // Muestra el diálogo de configuración previa a la importación aditiva.
@@ -9616,6 +9875,8 @@ function _showImportAddDialog(){
         <input type="text" id="imAddZoneName" value="Importado · ${p.fname.replace(/\.[^.]+$/,'')}" style="padding:3px 6px;border-radius:4px;border:1px solid #c8d0e0;font-size:.7rem">
       </div>
 
+      ${_bloqueRectas(bb, 'imAddRectas')}
+
       <div style="background:#fffae0;border:1px solid #f0e090;border-radius:5px;padding:6px 10px;margin-bottom:10px;font-size:.6rem;color:#765">
         ℹ Las coordenadas del archivo de origen <b>se preservan</b>: si tu programa CAD exportó la geometría con coordenadas absolutas (p. ej. coordenadas reales del proyecto), aparecerán en la misma posición. Usa los offsets para ajustes finos relativos al modelo actual.
       </div>
@@ -9685,6 +9946,7 @@ function _imAddConfirm(){
     rotation: rotY,
     scale: scale,
     upAxis: upAxis,
+    cortarRectas: !!document.getElementById('imAddRectas')?.checked,
     targetZoneStrategy: zoneStrat,
     newZoneName: zoneName,
     sourceName: p.fname
@@ -9727,6 +9989,26 @@ let _repImportPending = null;   // {ext, buf, fname, bbox}
 // condiciones e Y no las cumple; en cualquier caso ambiguo se queda en
 // Y-up, que es la convención de SketchUp y de glTF.
 function _ejeVerticalProbable(bb){
+  // ── 1) Firma del plano del suelo (prueba principal) ───────────────
+  // Se buscan ejes que arranquen en cero Y sean claramente pesados por
+  // abajo. Si gana uno solo, es el vertical, con bastante confianza.
+  const E = bb && bb.ejes;
+  if(E){
+    const cand = [1,2].filter(a => E[a].enCero && E[a].pesoAbajo >= 1.8);
+    if(cand.length === 1 && !(E[0].enCero && E[0].pesoAbajo >= E[cand[0]].pesoAbajo)){
+      return cand[0] === 2 ? 'z' : 'y';
+    }
+    if(cand.length === 2){
+      // Empate entre Y y Z: decide la asimetría, que es lo que distingue
+      // un suelo de una fachada que pasa por el origen.
+      return (E[2].pesoAbajo > E[1].pesoAbajo * 1.5) ? 'z' : 'y';
+    }
+  }
+  // ── 2) Respaldo por proporciones ──────────────────────────────────
+  // Un edificio suele ser más ancho que alto, así que el eje vertical es
+  // el de menor extensión y los dos horizontales guardan entre sí una
+  // proporción razonable. Es un indicio débil: ante la duda, Y-up, que es
+  // la convención de SketchUp y de glTF.
   const dx = bb.max.x - bb.min.x, dy = bb.max.y - bb.min.y, dz = bb.max.z - bb.min.z;
   const plausible = (v, a, b) =>
     v <= Math.min(a, b) * 1.05 && Math.max(a, b) <= Math.min(a, b) * 8;
@@ -9812,6 +10094,8 @@ function _showImportReplaceDialog(){
         </label>
       </div>
 
+      ${_bloqueRectas(bb, 'imRepRectas')}
+
       ${esGltf ? `
       <div style="background:#f4f4f0;border:1px solid #ddd;border-radius:5px;padding:6px 10px;margin-bottom:10px;font-size:.6rem;color:#666;line-height:1.5">
         El formato glTF fija <b>Y-up</b> y <b>metros</b> por especificación, así que
@@ -9871,11 +10155,13 @@ function _imRepConfirm(){
   const scale    = parseFloat(document.getElementById('imRepScale').value) || 1.0;
   const upAxis   = (document.getElementById('imRepUp').value === 'z') ? 'z' : 'y';
   const recenter = !!document.getElementById('imRepRecenter')?.checked;
+  const rectas   = !!document.getElementById('imRepRectas')?.checked;
 
   const dlg = document.getElementById('importRepDlg');
   if(dlg) dlg.remove();
 
-  const opts = { mode:'replace', scale, upAxis, recenter, sourceName:p.fname };
+  const opts = { mode:'replace', scale, upAxis, recenter,
+                 cortarRectas:rectas, sourceName:p.fname };
   log(`Cargando ${p.fname} — escala ×${scale}, eje vertical ${upAxis.toUpperCase()}, `
     + `${recenter?'recentrado al origen':'coordenadas del archivo'}…`);
 
@@ -9934,7 +10220,9 @@ function importGLTF(buf, fname, opts){
       // Decompose each imported mesh by normals
       const geoms=[];
       raw.forEach(({name,geo})=>{
-        const parts=descomponerPorNormales(name,geo);
+        const parts=descomponerPorNormales(name, geo, undefined, null,
+          { rectas: !!(opts && opts.cortarRectas),
+            up: (opts && opts.upAxis === 'z') ? 'z' : 'y' });
         parts.forEach(p=>geoms.push(p));
       });
       registrar(geoms, Object.assign({sourceName:fname||'GLTF'}, opts||{}));
@@ -9973,10 +10261,28 @@ function _reportarAristas(nAristas, cortes){
   }
 }
 
+// v11.6 — informe del corte por aristas rectas entre caras coplanares.
+function _reportarRectas(cortes){
+  if(cortes > 0){
+    log(`Caras coplanares: ${cortes} separaciones por aristas rectas ` +
+        '(vanos recuperados). Revisa el reparto antes de asignar acristalamientos.', 'ok');
+  } else {
+    log('Separación por aristas rectas activa, pero no encontró ninguna: ' +
+        'las caras coplanares del archivo no traen contornos rectos interiores.', 'warn');
+  }
+}
+
 function importOBJ(text, fname, opts){
   const verts=[], geoms=[];
   const hardEdges=[];                   // v8.2: aristas «l» del archivo
   const _cortesIni = _dpbCortes;        // v8.2: para contar solo esta importación
+  // v11.6: la descomposición trabaja sobre la geometría TAL COMO VIENE del
+  // archivo —la conversión de ejes y unidades la aplica registrar() después—,
+  // así que hay que decirle cuál es el eje vertical del archivo.
+  const _dOp = { rectas: !!(opts && opts.cortarRectas),
+                 up: (opts && opts.upAxis === 'z') ? 'z' : 'y' };
+  const _rectasIni = _dpbRectas;
+  const _nulosIni  = _geoGruposNulos;
   let curName='Mesh', faceCounter=0;
   let curTris=[];                       // sopa de triángulos pendiente de fusión
   let nonConvexHits = 0, degenHits = 0, totalTris = 0;
@@ -10007,7 +10313,8 @@ function importOBJ(text, fname, opts){
     if(cleaned.removed > 0) degenHits += cleaned.removed;
     // El "/" en el nombre permite que la estrategia byGroup siga agrupando por
     // el grupo original del archivo (groupNameOf corta en el último "/").
-    const parts=descomponerPorNormales(`${curName}/f${faceCounter}`, cleaned.geo);
+    const parts=descomponerPorNormales(`${curName}/f${faceCounter}`, cleaned.geo,
+                                       undefined, null, _dOp);
     parts.forEach(p=>geoms.push(p));
   }
 
@@ -10021,7 +10328,7 @@ function importOBJ(text, fname, opts){
     if(cleaned.removed > 0) degenHits += cleaned.removed;
     // descomponerPorNormales usa getEdgeAngle() (control «ARISTA» de la UI):
     // umbral de ángulo por debajo del cual dos caras contiguas se funden.
-    const parts=descomponerPorNormales(curName, cleaned.geo, undefined, hardEdges);
+    const parts=descomponerPorNormales(curName, cleaned.geo, undefined, hardEdges, _dOp);
     parts.forEach(p=>geoms.push(p));
     curTris=[];
   }
@@ -10144,6 +10451,11 @@ function importOBJ(text, fname, opts){
     if(degenHits > 0)      msg += ` · ${degenHits} triángulo(s) degenerado(s) descartado(s)`;
     log(msg, 'ok');
     _reportarAristas(hardEdges.length/6, _dpbCortes - _cortesIni);
+    if(_dOp.rectas) _reportarRectas(_dpbRectas - _rectasIni);
+    if(_geoGruposNulos - _nulosIni > 0){
+      log(`${_geoGruposNulos - _nulosIni} cara(s) sin área descartadas ` +
+          '(triángulos colapsados del exportador).', 'warn');
+    }
   }
 }
 
@@ -10175,7 +10487,9 @@ function importSTL(buf, fname, opts){
   const baseName=fname?fname.replace(/\.[^.]+$/,''):'STL';
   // Limpiar triángulos degenerados antes de descomponer
   const cleaned = cleanDegenerateTris(geo, 1e-7);
-  const parts=descomponerPorNormales(baseName, cleaned.geo);
+  const parts=descomponerPorNormales(baseName, cleaned.geo, undefined, null,
+    { rectas: !!(opts && opts.cortarRectas),
+      up: (opts && opts.upAxis === 'z') ? 'z' : 'y' });
   registrar(parts, Object.assign({sourceName:fname||'STL'}, opts||{}));
   let msg = `STL: ${parts.length} superficies por descomposición`;
   if(cleaned.removed > 0) msg += ` · ${cleaned.removed} triángulo(s) degenerado(s) eliminado(s)`;
@@ -25496,7 +25810,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.5
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.6
   </div>
 </div>
 <script>
@@ -26967,7 +27281,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.5</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.6</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -27001,7 +27315,19 @@ function mostrarAcercaDeNuevo(){
           (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">m · cm · mm · pulgadas · pies</span> o escala libre), con sugerencia
           automática por la magnitud del modelo y previsualización de las dimensiones
           resultantes antes de importar. La misma conversión está disponible en la
-          importación aditiva, que la hereda del modelo base.</li>
+          importación aditiva, que la hereda del modelo base. El eje vertical se
+          deduce de la firma del plano del suelo —qué eje arranca en cero y concentra
+          los vértices abajo— y las unidades, de la magnitud del modelo.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Recuperación de vanos
+          en caras coplanares.</strong> Muchos exportadores (conversores de BIM e IFC,
+          modeladores ligeros) escriben las ventanas y puertas no como agujeros sino como
+          rectángulos coplanares rellenos con el mismo material, sin aristas
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">«l»</span>, sin grupos y sin materiales distintos:
+          la fachada entera llega como una sola superficie opaca. BioSim puede separarlos
+          cortando por las aristas interiores que son horizontales o verticales dentro del
+          plano de su cara —dinteles, antepechos y jambas—, que es lo único que las
+          distingue de una diagonal de triangulación. Disponible al importar y, después,
+          en <em>Modelo → Dividir caras coplanares</em>.</li>
         <li style="margin-bottom:7px">Transmitancia <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">U</span> por composición multicapa
           (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ISO 6946</span>) y contacto con terreno (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ISO 13370</span>),
           sobre una biblioteca de materiales editable.</li>
@@ -27047,15 +27373,25 @@ function mostrarAcercaDeNuevo(){
           funciones de transferencia como el de EnergyPlus o TAS.</li>
         <li style="margin-bottom:7px">La radiación transmitida al interior por los acristalamientos se reparte con pesos
           fijos (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">60 % pisos · 40 % particiones</span>), sin trazado de rayos interior.</li>
-        <li style="margin-bottom:7px"><strong style="color:var(--text)">Detección de ejes y unidades.</strong> La
-          sugerencia del diálogo de importación es una heurística por proporciones: supone que un
-          edificio es más ancho que alto y que su planta no es desmesuradamente alargada. En torres,
-          en modelos de una sola planta muy alargados y en geometrías sueltas (una celosía, un
-          terreno) puede equivocarse, y en glTF siempre propone
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Detección de ejes y unidades.</strong> Los
+          archivos OBJ y STL <b>no declaran</b> ni sus unidades ni su eje vertical: el dato no está en
+          el archivo y toda propuesta del diálogo es una deducción. La principal busca la firma del
+          plano del suelo (el eje que arranca en cero y concentra los vértices abajo) y acierta en
+          modelos de edificio completo; si esa firma no aparece —geometrías sueltas, modelos con
+          sótano, terrenos, una celosía exportada por separado— cae en una comparación de
+          proporciones, mucho más débil. En glTF siempre propone
           <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Y-up</span> por norma del formato. Comprueba siempre la
           previsualización de dimensiones: es la verificación barata de que el modelo entra a escala
-          y en pie. Los archivos OBJ y STL <b>no declaran</b> ni sus unidades ni su eje vertical, así
-          que el dato no está en el archivo y no hay forma de deducirlo con certeza.</li>
+          y en pie.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">La recuperación de vanos es una
+          heurística, no una lectura del archivo.</strong> Se apoya en que el contorno de un vano es
+          recto en el plano de su muro, lo que es cierto en arquitectura convencional pero no en
+          ventanas circulares, triangulares o inclinadas, ni en muros curvos facetados. Puede además
+          partir de más un paño cuyo triangulador haya dejado aristas rectas auxiliares; el reparto
+          es inocuo —las partes heredan zona y construcción, y las áreas suman igual— pero obliga a
+          revisar el resultado. Cuando el archivo trae aristas
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">«l»</span>, grupos o materiales distintos, esos datos son
+          lectura directa del modelo y siempre mandan sobre esta deducción.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Normales importadas.</strong> La orientación
           de cada superficie se deduce del orden de sus vértices más una heurística que supone el modelo centrado
           en el origen. En modelos importados esto falla con frecuencia y deja caras mirando hacia dentro, que
