@@ -1,5 +1,19 @@
+# Dependencias y artefactos de compilacion
 node_modules/
 dist/
+build/icon-*.png
+
+# Registros y temporales del sistema
 *.log
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Archivos de trabajo del usuario: proyectos y climas no van al repositorio
+*.bio
+*.epw
+*.EPW
+
+# Versiones antiguas del HTML. El unico archivo valido es BioSim.html
+BioSim_v*.html
+BioSim*(*).html
