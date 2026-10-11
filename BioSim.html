@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v11.4</title>
+<title>BioSim v11.5</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4126,14 +4126,14 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.4</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.5</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
       <a onclick="cargarProyecto()" style="font-weight:700">📂 Abrir proyecto...</a>
       <hr>
       <a onclick="document.getElementById('fEPW').click()">📂 Abrir archivo EPW...</a>
-      <a onclick="document.getElementById('fMOD').click()" title="Reemplaza el modelo existente. Recentra al origen XZ y eleva la base a Y=0.">📂 Abrir Modelo 3D (reemplazar)...</a>
+      <a onclick="document.getElementById('fMOD').click()" title="Reemplaza el modelo existente. Pregunta por las unidades y el eje vertical del archivo antes de importar.">📂 Abrir Modelo 3D (reemplazar)...</a>
       <a onclick="abrirImportAditivo()" title="Añade geometría al modelo existente preservando las coordenadas del archivo. Útil para incorporar partes generadas en software externo (SketchUp, Revit, Blender, AutoCAD, etc.)" style="color:#22aabb;font-weight:600">✚ Añadir geometría al modelo...</a>
       <hr>
       <a onclick="exportarCSV()" id="aCSV">⬇ Exportar resultados CSV</a>
@@ -5591,7 +5591,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.4 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.5 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -8443,6 +8443,45 @@ function registrar(geometrias, opts){
   const scale = (typeof opts.scale==='number' && opts.scale>0) ? opts.scale : 1.0;
   const sourceName = opts.sourceName || 'modelo';
 
+  // ── v11.5: SISTEMA DE COORDENADAS DE ORIGEN Y UNIDADES ──────────────
+  // BioSim trabaja internamente en METROS y con el eje Y vertical (Y-up),
+  // que es la convención del visor Three.js y del formato glTF. Los
+  // archivos de origen no siempre llegan así:
+  //
+  //   · SketchUp exporta OBJ/DAE en Y-up, pero en las unidades del modelo:
+  //     si la plantilla es imperial, los vértices vienen en pulgadas.
+  //   · AutoCAD, Revit, Rhino, ArchiCAD e IFC trabajan en Z-up, y sus
+  //     exportadores a OBJ/STL suelen volcar los ejes tal cual.
+  //   · Los STL de impresión 3D vienen casi siempre en milímetros.
+  //
+  // Un modelo en milímetros entra mil veces más grande y el trazado de
+  // rayos lo lee como una ciudad; un modelo en Z-up entra tumbado, con lo
+  // que las cubiertas se etiquetan como muros, el sol les llega de lado y
+  // el balance térmico pierde todo sentido. Esta pasada previa normaliza
+  // la geometría ANTES de cualquier otro cálculo, de modo que el
+  // recentrado, los offsets, las áreas, las normales y el etiquetado
+  // automático trabajen siempre en metros y Y-up.
+  const upAxis = (opts.upAxis === 'z') ? 'z' : 'y';
+  if(scale !== 1 || upAxis === 'z'){
+    geometrias.forEach(({geo})=>{
+      if(!geo || !geo.attributes || !geo.attributes.position) return;
+      const p = geo.attributes.position;
+      for(let i=0;i<p.count;i++){
+        let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+        if(upAxis === 'z'){
+          // Giro de −90° alrededor de X: (x,y,z)_Zup → (x, z, −y)_Yup.
+          // Es una rotación propia (determinante +1), así que conserva el
+          // sentido de giro de los triángulos y, con él, las normales.
+          const ny = z, nz = -y;
+          y = ny; z = nz;
+        }
+        p.setX(i, x*scale); p.setY(i, y*scale); p.setZ(i, z*scale);
+      }
+      p.needsUpdate = true;
+      geo.computeBoundingBox();
+    });
+  }
+
   // ── Modo REEMPLAZO (comportamiento original): limpiar todo ──
   if(mode === 'replace'){
     const prev=scene.getObjectByName('__root__');
@@ -8518,10 +8557,12 @@ function registrar(geometrias, opts){
     offsetX = importCenter.x;
     offsetY = allBBox.min.y;
     offsetZ = importCenter.z;
-    modelOrigin = {x:offsetX, y:offsetY, z:offsetZ, src:(opts.sourceName || fname || 'modelo base')};
+    modelOrigin = {x:offsetX, y:offsetY, z:offsetZ, uScale:scale, upAxis:upAxis,
+                   src:(opts.sourceName || fname || 'modelo base')};
   } else if(mode === 'replace'){
     // Reemplazo sin recentrar: el origen del modelo es el del archivo.
-    modelOrigin = {x:0, y:0, z:0, src:(opts.sourceName || fname || 'modelo base')};
+    modelOrigin = {x:0, y:0, z:0, uScale:scale, upAxis:upAxis,
+                   src:(opts.sourceName || fname || 'modelo base')};
   }
 
   // Matriz de rotación alrededor del eje Y (vertical) para modo aditivo
@@ -8538,11 +8579,12 @@ function registrar(geometrias, opts){
       }
       return { x: vx, y: vy, z: vz };
     } else {
-      // Aditivo: escala primero, luego rotación Y, luego offset usuario.
-      // El offset va en metros del MODELO, no del archivo, así que se aplica
-      // después de escalar y rotar — que es lo que espera la casilla de
-      // alineación con el modelo base.
-      let x = vx * scale, y = vy * scale, z = vz * scale;
+      // Aditivo: la escala y el eje vertical ya vienen aplicados por la
+      // pasada de normalización de arriba, así que aquí solo queda la
+      // rotación Y y el offset del usuario. El offset va en metros del
+      // MODELO, no del archivo, por eso se aplica al final — que es lo que
+      // espera la casilla de alineación con el modelo base.
+      let x = vx, y = vy, z = vz;
       const xr = x*cosA - z*sinA;
       const zr = x*sinA + z*cosA;
       x = xr + offset.x;
@@ -9478,6 +9520,20 @@ function _showImportAddDialog(){
   else if(maxDim > 500){ suggestedScale = 0.01; suggestedUnit = 'cm'; }
   // (por debajo de 500 se asume metros: suggestedScale=1, suggestedUnit='m')
 
+  // v11.5 — Eje vertical y unidades heredados del modelo base.
+  // El caso habitual de una importación aditiva es traer otra pieza del
+  // MISMO archivo de origen, así que la conversión que se aplicó al cargar
+  // el modelo base es la que corresponde aquí también. Si hay un modelo
+  // base con conversión conocida se propone esa; si no, se cae en la
+  // heurística por magnitud y en Y-up.
+  let suggestedUp = _ejeVerticalProbable(bb);
+  if(p.ext === 'glb' || p.ext === 'gltf') suggestedUp = 'y';   // glTF es Y-up por norma
+  if(modelOrigin && typeof modelOrigin.uScale === 'number' && modelOrigin.uScale > 0){
+    suggestedScale = modelOrigin.uScale;
+    suggestedUnit  = ({1:'m', 0.01:'cm', 0.001:'mm', 0.0254:'in', 0.3048:'ft'})[suggestedScale] || 'custom';
+    if(modelOrigin.upAxis) suggestedUp = modelOrigin.upAxis;
+  }
+
   let dlg = document.getElementById('importAddDlg');
   if(dlg) dlg.remove();
   dlg = document.createElement('div');
@@ -9502,6 +9558,8 @@ function _showImportAddDialog(){
           <input type="checkbox" id="imAddAlign" checked onchange="_imAddAlignToggle()" style="margin-top:2px;cursor:pointer">
           <span>Alinear con el modelo base
             <span style="display:block;font-weight:400;color:#40607a;margin-top:2px">
+              ${(modelOrigin.uScale && modelOrigin.uScale!==1) || modelOrigin.upAxis==='z'
+                ? `El modelo base se convirtió al entrar (escala ×${modelOrigin.uScale}, eje vertical ${String(modelOrigin.upAxis||'y').toUpperCase()}); usa los mismos valores arriba si esta pieza viene del mismo archivo.<br>` : ''}
               Al abrir <b>${modelOrigin.src}</b>, BioSim lo desplazó
               (${(-modelOrigin.x).toFixed(2)}, ${(-modelOrigin.y).toFixed(2)}, ${(-modelOrigin.z).toFixed(2)}) m
               para centrarlo y apoyarlo en Y=0. Si esta pieza viene del mismo archivo,
@@ -9516,14 +9574,20 @@ function _showImportAddDialog(){
       </div>`}
 
       <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;margin-bottom:8px">
+        <label style="font-weight:600">Eje vertical del archivo</label>
+        <select id="imAddUp" style="padding:3px 6px;border-radius:4px;border:1px solid #c8d0e0;font-size:.7rem">
+          <option value="y" ${suggestedUp==='y'?'selected':''}>Y arriba (Y-up) — SketchUp, glTF, Blender</option>
+          <option value="z" ${suggestedUp==='z'?'selected':''}>Z arriba (Z-up) — AutoCAD, Revit, Rhino, IFC</option>
+        </select>
+
         <label style="font-weight:600">Unidades del archivo</label>
         <select id="imAddUnits" onchange="_imAddOnUnitChange()" style="padding:3px 6px;border-radius:4px;border:1px solid #c8d0e0;font-size:.7rem">
           <option value="1"     ${suggestedUnit==='m' ?'selected':''}>Metros (×1)</option>
           <option value="0.01"  ${suggestedUnit==='cm'?'selected':''}>Centímetros (×0.01)</option>
           <option value="0.001" ${suggestedUnit==='mm'?'selected':''}>Milímetros (×0.001)</option>
-          <option value="0.0254">Pulgadas (×0.0254)</option>
-          <option value="0.3048">Pies (×0.3048)</option>
-          <option value="custom">Escala personalizada…</option>
+          <option value="0.0254" ${suggestedUnit==='in'?'selected':''}>Pulgadas (×0.0254)</option>
+          <option value="0.3048" ${suggestedUnit==='ft'?'selected':''}>Pies (×0.3048)</option>
+          <option value="custom" ${suggestedUnit==='custom'?'selected':''}>Escala personalizada…</option>
         </select>
 
         <label style="font-weight:600">Factor escala</label>
@@ -9611,6 +9675,7 @@ function _imAddConfirm(){
   const offY  = parseFloat(document.getElementById('imAddOffY').value) || 0;
   const offZ  = parseFloat(document.getElementById('imAddOffZ').value) || 0;
   const rotY  = parseFloat(document.getElementById('imAddRotY').value) || 0;
+  const upAxis = (document.getElementById('imAddUp')?.value === 'z') ? 'z' : 'y';
   const zoneStrat = document.getElementById('imAddZone').value;
   const zoneName  = document.getElementById('imAddZoneName').value.trim() || `Importado · ${p.fname}`;
 
@@ -9619,6 +9684,7 @@ function _imAddConfirm(){
     offset: {x:offX, y:offY, z:offZ},
     rotation: rotY,
     scale: scale,
+    upAxis: upAxis,
     targetZoneStrategy: zoneStrat,
     newZoneName: zoneName,
     sourceName: p.fname
@@ -9627,7 +9693,8 @@ function _imAddConfirm(){
   const dlg = document.getElementById('importAddDlg');
   if(dlg) dlg.remove();
 
-  log(`Importando ${p.fname} (aditivo, escala ${scale}, offset ${offX.toFixed(1)},${offY.toFixed(1)},${offZ.toFixed(1)}, rot ${rotY}°)…`);
+  log(`Importando ${p.fname} (aditivo, escala ${scale}, eje vertical ${upAxis.toUpperCase()}, `
+    + `offset ${offX.toFixed(1)},${offY.toFixed(1)},${offZ.toFixed(1)}, rot ${rotY}°)…`);
 
   if(p.ext==='glb' || p.ext==='gltf') importGLTF(p.buf, p.fname, opts);
   else if(p.ext==='obj') importOBJ(p.buf, p.fname, opts);
@@ -9636,16 +9703,212 @@ function _imAddConfirm(){
   _addImportPending = null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 📥  IMPORTACIÓN POR REEMPLAZO — UNIDADES Y SISTEMA DE COORDENADAS (v11.5)
+// ═══════════════════════════════════════════════════════════════════════
+// Hasta v11.4 el modelo base entraba sin preguntar nada: se asumía que el
+// archivo venía en metros y con Y vertical. Cuando no era así —y con
+// exportadores de CAD casi nunca lo es— el modelo entraba mil veces más
+// grande o tumbado de lado, y los síntomas aparecían mucho después, en
+// forma de cubiertas etiquetadas como muros o de radiación absurda.
+// Ahora se pregunta antes de importar, igual que en DaylightApp.
+//
+// La conversión se aplica en registrar() (opts.scale y opts.upAxis), antes
+// del recentrado y del etiquetado, de modo que todo lo que viene después
+// trabaja en metros y Y-up.
+
+let _repImportPending = null;   // {ext, buf, fname, bbox}
+
+// ── Sugerencia de eje vertical ────────────────────────────────────────
+// Solo una SUGERENCIA: el usuario decide. La pista es que un edificio es
+// casi siempre más ancho que alto, así que el eje vertical suele ser el de
+// menor extensión, y los dos horizontales guardan entre sí una proporción
+// razonable. Se propone Z-up únicamente cuando Z cumple esas dos
+// condiciones e Y no las cumple; en cualquier caso ambiguo se queda en
+// Y-up, que es la convención de SketchUp y de glTF.
+function _ejeVerticalProbable(bb){
+  const dx = bb.max.x - bb.min.x, dy = bb.max.y - bb.min.y, dz = bb.max.z - bb.min.z;
+  const plausible = (v, a, b) =>
+    v <= Math.min(a, b) * 1.05 && Math.max(a, b) <= Math.min(a, b) * 8;
+  const yOk = plausible(dy, dx, dz);
+  const zOk = plausible(dz, dx, dy);
+  return (zOk && !yOk) ? 'z' : 'y';
+}
+
+// Sugerencia de unidades por magnitud del modelo (misma lógica que el
+// diálogo aditivo): un edificio mide decenas de metros, miles de
+// centímetros o decenas de miles de milímetros.
+function _unidadProbable(maxDim){
+  if(maxDim > 5000) return {unit:'mm', scale:0.001};
+  if(maxDim > 500)  return {unit:'cm', scale:0.01};
+  return {unit:'m', scale:1};
+}
+
+function _showImportReplaceDialog(){
+  if(!_repImportPending) return;
+  const p  = _repImportPending;
+  const bb = p.bbox;
+  const dx = bb.max.x - bb.min.x, dy = bb.max.y - bb.min.y, dz = bb.max.z - bb.min.z;
+  const maxDim = Math.max(dx, dy, dz);
+  const su = _unidadProbable(maxDim);
+  const upSug = _ejeVerticalProbable(bb);
+  const esGltf = (p.ext === 'glb' || p.ext === 'gltf');
+  // glTF fija Y-up por especificación, así que no se sugiere girarlo.
+  const upDef = esGltf ? 'y' : upSug;
+
+  let dlg = document.getElementById('importRepDlg');
+  if(dlg) dlg.remove();
+  dlg = document.createElement('div');
+  dlg.id = 'importRepDlg';
+  dlg.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;font-family:Inter,sans-serif;color:#223';
+  dlg.innerHTML = `
+    <div style="background:#fff;border-radius:8px;padding:16px 20px;width:500px;max-width:94vw;box-shadow:0 18px 50px rgba(0,0,0,0.4);font-size:.72rem">
+      <div style="font-size:.85rem;font-weight:700;color:#22aabb;margin-bottom:4px">📥 Cargar modelo</div>
+      <div style="font-size:.6rem;color:#888;margin-bottom:10px">
+        <b>${p.fname}</b> — reemplaza la geometría actual. BioSim trabaja en
+        <b>metros</b> y con el eje <b>Y vertical</b>; indica cómo viene el archivo
+        de origen para convertirlo al entrar.
+      </div>
+
+      <div style="background:#f6f8fa;border:1px solid #e0e4ec;border-radius:5px;padding:6px 10px;margin-bottom:10px;font-size:.62rem;color:#557;line-height:1.6">
+        <b>Caja envolvente del archivo</b> (unidades del archivo, sin convertir):<br>
+        X <b>${dx.toFixed(2)}</b> · Y <b>${dy.toFixed(2)}</b> · Z <b>${dz.toFixed(2)}</b>
+      </div>
+
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;align-items:center;margin-bottom:10px">
+        <label style="font-weight:600">Eje vertical del archivo</label>
+        <select id="imRepUp" onchange="_imRepRefresh()" style="padding:3px 6px;border-radius:4px;border:1px solid #c8d0e0;font-size:.7rem">
+          <option value="y" ${upDef==='y'?'selected':''}>Y arriba (Y-up) — SketchUp, glTF, Blender</option>
+          <option value="z" ${upDef==='z'?'selected':''}>Z arriba (Z-up) — AutoCAD, Revit, Rhino, ArchiCAD, IFC</option>
+        </select>
+
+        <label style="font-weight:600">Unidades del archivo</label>
+        <select id="imRepUnits" onchange="_imRepOnUnitChange()" style="padding:3px 6px;border-radius:4px;border:1px solid #c8d0e0;font-size:.7rem">
+          <option value="1"      ${su.unit==='m' ?'selected':''}>Metros (×1)</option>
+          <option value="0.01"   ${su.unit==='cm'?'selected':''}>Centímetros (×0.01)</option>
+          <option value="0.001"  ${su.unit==='mm'?'selected':''}>Milímetros (×0.001)</option>
+          <option value="0.0254">Pulgadas (×0.0254)</option>
+          <option value="0.3048">Pies (×0.3048)</option>
+          <option value="custom">Escala personalizada…</option>
+        </select>
+
+        <label style="font-weight:600">Factor escala</label>
+        <input type="number" id="imRepScale" value="${su.scale}" step="0.001" min="0.0001" oninput="_imRepRefresh()" style="padding:3px 6px;border-radius:4px;border:1px solid #c8d0e0;font-size:.7rem;font-family:var(--font-mono)">
+      </div>
+
+      <div id="imRepOut" style="background:#eef6ff;border:1px solid #b8d4f0;border-radius:5px;padding:7px 10px;margin-bottom:10px;font-size:.66rem;color:#20406a;line-height:1.6"></div>
+
+      <div style="background:#f6f8fa;border:1px solid #e0e4ec;border-radius:5px;padding:7px 10px;margin-bottom:10px;font-size:.64rem;color:#557;line-height:1.55">
+        <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;font-weight:600">
+          <input type="checkbox" id="imRepRecenter" checked style="margin-top:2px;cursor:pointer">
+          <span>Recentrar en el origen y apoyar la base en Y=0
+            <span style="display:block;font-weight:400;color:#667;margin-top:2px">
+              Recomendado. Desmárcala para conservar las coordenadas absolutas
+              del archivo (coordenadas reales de proyecto, implantación urbana).
+              El desplazamiento aplicado se recuerda, y las importaciones
+              aditivas posteriores del mismo archivo pueden alinearse con él.
+            </span>
+          </span>
+        </label>
+      </div>
+
+      ${esGltf ? `
+      <div style="background:#f4f4f0;border:1px solid #ddd;border-radius:5px;padding:6px 10px;margin-bottom:10px;font-size:.6rem;color:#666;line-height:1.5">
+        El formato glTF fija <b>Y-up</b> y <b>metros</b> por especificación, así que
+        normalmente no hay nada que convertir. Cámbialo solo si el exportador
+        no respetó la norma.
+      </div>` : ''}
+
+      <div style="display:flex;justify-content:flex-end;gap:6px">
+        <button onclick="_imRepCancel()" style="padding:5px 12px;background:#eef;border:1px solid #c8d0e0;border-radius:4px;cursor:pointer;font-size:.7rem">Cancelar</button>
+        <button onclick="_imRepConfirm()" style="padding:5px 14px;background:#22aabb;border:none;border-radius:4px;cursor:pointer;color:#fff;font-weight:700;font-size:.7rem">Cargar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dlg);
+  _imRepRefresh();
+}
+
+// Previsualización: dimensiones que tendrá el modelo YA convertido. Es el
+// control de sanidad más útil del diálogo — una altura de 0.03 m o de
+// 300 m delata al instante que las unidades o el eje están mal elegidos.
+function _imRepRefresh(){
+  const p = _repImportPending; if(!p) return;
+  const bb = p.bbox;
+  const sc = parseFloat(document.getElementById('imRepScale')?.value) || 1;
+  const up = document.getElementById('imRepUp')?.value || 'y';
+  let dx = bb.max.x - bb.min.x, dy = bb.max.y - bb.min.y, dz = bb.max.z - bb.min.z;
+  // Tras el giro −90° en X, la extensión vertical pasa de Z a Y.
+  if(up === 'z'){ const t = dy; dy = dz; dz = t; }
+  const alto = dy * sc;
+  const out = document.getElementById('imRepOut');
+  if(!out) return;
+  let aviso = '';
+  if(alto < 1.8)      aviso = `<div style="color:#b03000;font-weight:600;margin-top:4px">⚠ Altura de ${alto.toFixed(2)} m: demasiado baja para un edificio. Revisa las unidades y el eje vertical.</div>`;
+  else if(alto > 120) aviso = `<div style="color:#b03000;font-weight:600;margin-top:4px">⚠ Altura de ${alto.toFixed(0)} m: revisa las unidades y el eje vertical si no es una torre.</div>`;
+  out.innerHTML =
+    `<b>Al importar:</b> planta <b>${(dx*sc).toFixed(2)} × ${(dz*sc).toFixed(2)} m</b>` +
+    ` · altura <b>${alto.toFixed(2)} m</b>` + aviso;
+}
+
+function _imRepOnUnitChange(){
+  const u  = document.getElementById('imRepUnits').value;
+  const sc = document.getElementById('imRepScale');
+  if(u !== 'custom' && sc) sc.value = u;
+  _imRepRefresh();
+}
+
+function _imRepCancel(){
+  _repImportPending = null;
+  const dlg = document.getElementById('importRepDlg');
+  if(dlg) dlg.remove();
+  log('Importación cancelada.','warn');
+}
+
+function _imRepConfirm(){
+  if(!_repImportPending){ _imRepCancel(); return; }
+  const p = _repImportPending;
+  const scale    = parseFloat(document.getElementById('imRepScale').value) || 1.0;
+  const upAxis   = (document.getElementById('imRepUp').value === 'z') ? 'z' : 'y';
+  const recenter = !!document.getElementById('imRepRecenter')?.checked;
+
+  const dlg = document.getElementById('importRepDlg');
+  if(dlg) dlg.remove();
+
+  const opts = { mode:'replace', scale, upAxis, recenter, sourceName:p.fname };
+  log(`Cargando ${p.fname} — escala ×${scale}, eje vertical ${upAxis.toUpperCase()}, `
+    + `${recenter?'recentrado al origen':'coordenadas del archivo'}…`);
+
+  if(p.ext==='glb' || p.ext==='gltf') importGLTF(p.buf, p.fname, opts);
+  else if(p.ext==='obj') importOBJ(p.buf, p.fname, opts);
+  else if(p.ext==='stl') importSTL(p.buf, p.fname, opts);
+
+  _repImportPending = null;
+}
+
 document.getElementById('fMOD').addEventListener('change',function(e){
   const file=e.target.files[0]; if(!file) return;
   const ext=file.name.split('.').pop().toLowerCase();
-  log(`Cargando: ${file.name}…`);
+  if(!['gltf','glb','obj','stl'].includes(ext)){ log('Formato no soportado.','err'); e.target.value=''; return; }
+  log(`Leyendo: ${file.name}…`);
   const reader=new FileReader();
   reader.onload=ev=>{
-    if(ext==='glb'||ext==='gltf') importGLTF(ev.target.result, file.name);
-    else if(ext==='obj') importOBJ(ev.target.result, file.name);
-    else if(ext==='stl') importSTL(ev.target.result, file.name);
-    else log('Formato no soportado.','err');
+    const pend = { ext, buf: ev.target.result, fname: file.name };
+    // Pre-escaneo de la caja envolvente para poder sugerir unidades y eje
+    // vertical, y para previsualizar el resultado de la conversión.
+    _addImportPreScan(pend).then(bbox=>{
+      pend.bbox = bbox;
+      _repImportPending = pend;
+      _showImportReplaceDialog();
+    }).catch(err=>{
+      // Si el pre-escaneo falla no se bloquea la importación: se carga con
+      // los valores neutros (metros, Y-up, recentrado), que es exactamente
+      // el comportamiento anterior a v11.5.
+      log('No se pudo pre-escanear el archivo ('+err.message+'). Se importa en metros y Y-up.','warn');
+      if(ext==='glb'||ext==='gltf') importGLTF(pend.buf, pend.fname);
+      else if(ext==='obj') importOBJ(pend.buf, pend.fname);
+      else if(ext==='stl') importSTL(pend.buf, pend.fname);
+    });
   };
   if(ext==='obj') reader.readAsText(file);
   else reader.readAsArrayBuffer(file);
@@ -25233,7 +25496,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.4
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.5
   </div>
 </div>
 <script>
@@ -26704,7 +26967,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.4</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.5</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -26730,7 +26993,15 @@ function mostrarAcercaDeNuevo(){
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Alcances</div>
       <ul style="padding-left:20px;margin:8px 0">
         <li style="margin-bottom:7px">Modelado por importación <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">OBJ · STL · GLTF/GLB</span>, con zonificación,
-          etiquetado automático de superficies y editor de capas constructivas.</li>
+          etiquetado automático de superficies y editor de capas constructivas.
+          Al cargar geometría se elige el <strong style="color:var(--text)">sistema de coordenadas de
+          origen</strong> (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Y-up</span> de SketchUp, glTF y Blender, o
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Z-up</span> de AutoCAD, Revit, Rhino, ArchiCAD e IFC) y las
+          <strong style="color:var(--text)">unidades del archivo</strong>
+          (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">m · cm · mm · pulgadas · pies</span> o escala libre), con sugerencia
+          automática por la magnitud del modelo y previsualización de las dimensiones
+          resultantes antes de importar. La misma conversión está disponible en la
+          importación aditiva, que la hereda del modelo base.</li>
         <li style="margin-bottom:7px">Transmitancia <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">U</span> por composición multicapa
           (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ISO 6946</span>) y contacto con terreno (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ISO 13370</span>),
           sobre una biblioteca de materiales editable.</li>
@@ -26776,6 +27047,15 @@ function mostrarAcercaDeNuevo(){
           funciones de transferencia como el de EnergyPlus o TAS.</li>
         <li style="margin-bottom:7px">La radiación transmitida al interior por los acristalamientos se reparte con pesos
           fijos (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">60 % pisos · 40 % particiones</span>), sin trazado de rayos interior.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Detección de ejes y unidades.</strong> La
+          sugerencia del diálogo de importación es una heurística por proporciones: supone que un
+          edificio es más ancho que alto y que su planta no es desmesuradamente alargada. En torres,
+          en modelos de una sola planta muy alargados y en geometrías sueltas (una celosía, un
+          terreno) puede equivocarse, y en glTF siempre propone
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Y-up</span> por norma del formato. Comprueba siempre la
+          previsualización de dimensiones: es la verificación barata de que el modelo entra a escala
+          y en pie. Los archivos OBJ y STL <b>no declaran</b> ni sus unidades ni su eje vertical, así
+          que el dato no está en el archivo y no hay forma de deducirlo con certeza.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Normales importadas.</strong> La orientación
           de cada superficie se deduce del orden de sus vértices más una heurística que supone el modelo centrado
           en el origen. En modelos importados esto falla con frecuencia y deja caras mirando hacia dentro, que
