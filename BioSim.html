@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.1</title>
+<title>BioSim v12.2</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.1</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.2</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5007,7 +5007,7 @@ canvas#cv{display:block;}
           <button class="btn btn-g btn-xs" id="bRadPdfBtn" onclick="exportTabPDF('bRad','Radiación Solar Incidente — BioSim')">⬇ PDF</button>
 
           <span id="radStatus" style="font-size:.56rem;color:var(--text3);font-family:var(--font-mono);margin-left:auto"></span>
-        </div>
+        </div><!--/radToolbar-->
 
         <!-- ── STATS ROW (shown after calculation) ── -->
         <div id="radStatsRow" style="display:none;flex-shrink:0;border-bottom:1px solid var(--border);background:var(--bg2);padding:4px 8px">
@@ -5040,7 +5040,7 @@ canvas#cv{display:block;}
         <div style="display:flex;flex:1;overflow:hidden">
 
           <!-- Legend bar — Ecotect style -->
-          <div style="width:52px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;padding:6px 3px;border-right:1px solid var(--border);background:var(--bg2)">
+          <div id="radLegendCol" style="width:52px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;padding:6px 3px;border-right:1px solid var(--border);background:var(--bg2)">
             <div style="font-size:.48rem;color:var(--text3);font-family:monospace;margin-bottom:3px;text-align:center">kWh/m²</div>
             <div style="flex:1;display:flex;gap:2px;width:100%">
               <canvas id="radLegendCanvas" width="16" height="200"
@@ -5597,7 +5597,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.1 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.2 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -26105,13 +26105,22 @@ function exportTabPDF(tabId, title){
         const metaEl    = document.getElementById('rStatMeta');
         const periodLbl = (typeof _radPeriod === 'function') ? _radPeriod().label : '';
         const metaTxt   = metaEl ? metaEl.textContent : '';
+        // v12.2: la escala de color acompaña a la imagen. Sin ella el
+        // falso color no se puede leer: se ve qué cara está más caliente,
+        // pero no cuánto. Va en SVG para que se imprima siempre.
+        const escalaSVG = (typeof _radEscalaSVG === 'function' && _radEscala)
+          ? `<div style="margin-top:7px">
+               <div style="font-size:7pt;color:#55606e;font-family:monospace;margin-bottom:2px">
+                 Escala de falso color · ${_radEscala.unidad}</div>
+               ${_radEscalaSVG(_radEscala.max, 540)}
+             </div>` : '';
         viewportImgTag = `
           <div style="margin-bottom:14px;page-break-inside:avoid">
             <img src="${dataUrl}" style="display:block;width:100%;max-height:360px;object-fit:contain;border-radius:4px">
-            <div style="font-size:7.5pt;color:#8090a8;font-family:monospace;margin-top:4px;display:flex;justify-content:space-between">
-              <span>☀ Falso-color 3D — Radiación Solar Incidente</span>
-              <span style="color:#c07030">${periodLbl}${metaTxt ? ' · ' + metaTxt : ''}</span>
+            <div style="font-size:7.5pt;color:#55606e;font-family:monospace;margin-top:5px">
+              ☀ Falso-color 3D — Radiación Solar Incidente · ${periodLbl}
             </div>
+            ${escalaSVG}
           </div>`;
       }
     } catch(e){ console.warn('No se pudo capturar el canvas 3D:', e); }
@@ -26120,6 +26129,40 @@ function exportTabPDF(tabId, title){
   const win = window.open('','_blank');
   if(!win){ alert('No se pudo abrir la ventana del informe. Permite las ventanas emergentes.'); return; }
   let body = el.innerHTML;
+
+  // v12.2 — La pestaña de radiación arrastraba al informe su barra de
+  // herramientas («ρ», «Falso-color 3D», «Vista al cielo») y el indicador
+  // de estado, que no son información del análisis sino controles de la
+  // interfaz. También arrastraba la columna de la escala, un <canvas> de
+  // 200 px dentro de una columna flexible: al imprimirse quedaba
+  // descolgada y sin marcas. La escala se vuelve a dibujar en vectorial
+  // junto a la vista 3D.
+  //
+  // Esta limpieza va ANTES de convertir los canvas en imágenes: después,
+  // el canvas de la escala ya habría perdido su id y no habría forma de
+  // localizar su columna.
+  if(tabId === 'bRad'){
+    // Quitar un <div id="..."> entero, contando anidamientos desde su
+    // propia etiqueta de apertura. Nada de adivinar contenedores.
+    const _quitarPorId = (html, id) => {
+      const marca = 'id="'+id+'"';
+      const i = html.indexOf(marca);
+      if(i < 0) return html;
+      const ini = html.lastIndexOf('<div', i);
+      if(ini < 0) return html;
+      const re = /<\/?div\b[^>]*>/g; re.lastIndex = ini;
+      let prof = 0, m, fin = html.length;
+      while((m = re.exec(html))){
+        prof += m[0][1] === '/' ? -1 : 1;
+        if(prof === 0){ fin = m.index + m[0].length; break; }
+      }
+      return html.slice(0, ini) + html.slice(fin);
+    };
+    body = _quitarPorId(body, 'radLegendCol');    // columna entera de la escala
+    body = body.replace(/<span\b[^>]*id="radStatus"[^>]*>[\s\S]*?<\/span>/g, '');
+    body = body.replace(/<label\b[^>]*>[\s\S]*?<\/label>/g, '');
+    body = body.replace(/ρ\s*(?=<)/g, '');
+  }
   // Reemplazar canvas → SVG vectorial (texto y líneas vectoriales)
   Object.entries(svgMap).forEach(([id,svgStr])=>{
     if(!id) return;
@@ -26138,20 +26181,65 @@ function exportTabPDF(tabId, title){
   body = body.replace(/<button[^>]*>[\s\S]*?<\/button>/g,'');
   // Strip select and input elements (replace with spans)
   body = body.replace(/<select[^>]*>[\s\S]*?<\/select>/g, '');
-  body = body.replace(/<input[^>]* type="(checkbox|button|submit)"[^>]*>/g, '');
+  // v12.2: TODOS los campos, no solo casilla/botón. Antes un <input
+  // type="number"> o type="text" sobrevivía y el informe salía con el
+  // albedo y las fechas como campos de formulario.
+  body = body.replace(/<input\b[^>]*>/g, '');
+
+
 
   win.document.write(`<!DOCTYPE html><html><head>
     <meta charset="utf-8">
     <title>${title} — BioSim</title>
     <style>
-      body{font-family:'Segoe UI',Arial,sans-serif;font-size:13pt;color:#222;margin:15mm 12mm;background:#fff}
-      h1{font-size:18pt;color:#223;border-bottom:2px solid #c8d0e0;padding-bottom:8px;margin-bottom:14px}
-      table{border-collapse:collapse;width:100%;margin-bottom:10px}
-      th,td{border:1px solid #dce4f0;padding:5px 8px;font-size:11pt}
+      /* v12.2 — EL FALSO COLOR DEBE IMPRIMIRSE.
+         Sin print-color-adjust el navegador descarta TODOS los fondos al
+         imprimir, por ahorro de tinta. En este informe eso borraba
+         justamente la información gráfica: la franja de color de cada
+         superficie y la celda coloreada del total, que son las que
+         permiten leer la tabla de un vistazo. El texto de colores sí se
+         imprimía, de modo que el informe parecía correcto y en realidad
+         había perdido su escala visual. */
+      /* El informe vuelca el HTML del panel, que usa variables CSS del
+         tema oscuro. En esta ventana no existen, así que cada
+         color:var(--text3) quedaba sin resolver y, peor, el recuadro
+         «TOTAL MEDIA» —texto blanco sobre var(--accent)— salía invisible:
+         blanco sobre blanco. Aquí se redefinen en su equivalente para
+         papel. */
+      :root{
+        --text:#1a2035; --text2:#2a3550; --text3:#5a6a88;
+        --bg:#ffffff; --bg2:#f6f8fc; --bg3:#eef2f9;
+        --border:#dce4f0; --accent:#2a6ad0; --accent2:#0a8a72;
+        --font-mono:'Consolas','Courier New',monospace;
+      }
+      *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+      /* El recuadro destacado del panel lleva texto pensado para el tema
+         oscuro; sobre el azul impreso hay que forzar el blanco. */
+      div[style*="background:var(--accent)"] *{ color:#fff !important; }
+      @page{ size: letter portrait; margin: 14mm 12mm; }
+      body{font-family:'Segoe UI',Arial,sans-serif;font-size:10pt;color:#222;margin:0;background:#fff}
+      h1{font-size:17pt;color:#223;border-bottom:2px solid #c8d0e0;padding-bottom:8px;margin:0 0 14px}
+      /* Las tablas salen enteras y sin partir filas entre páginas. */
+      /* Reparto automático: este informe vuelca la tabla del panel, cuyas
+         columnas no declaran ancho. Con table-layout:fixed el navegador
+         repartía mal y se tragaba las nueve columnas de datos, dejando
+         solo el nombre de la superficie. */
+      table{border-collapse:collapse;width:100%;max-width:100%;margin-bottom:10px}
+      th,td{border:1px solid #dce4f0;padding:3px 5px;font-size:7.5pt;overflow-wrap:break-word}
       th{background:#eef0f8;font-weight:600}
+      thead{display:table-header-group}
+      tr{break-inside:avoid;page-break-inside:avoid}
       img{max-width:100%}
       .h{display:none}
-      @media print{body{margin:10mm}}
+      /* El volcado del panel trae contenedores con scroll y alturas fijas
+         pensados para la pantalla; en papel deben fluir. */
+      /* El panel se maqueta con flex y contenedores con scroll, pensados
+         para la pantalla. En papel deben fluir como bloques, o la tabla
+         queda encajonada en una columna más estrecha que la hoja y se
+         recorta por la derecha. */
+      div[style*="overflow"]{overflow:visible !important}
+      div[style*="display:flex"]{display:block !important}
+      div[style*="flex:1"]{flex:none !important; width:auto !important}
     </style></head><body>
     <h1>${title}</h1>
     ${viewportImgTag}
@@ -26356,7 +26444,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.1
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.2
   </div>
 </div>
 <script>
@@ -27293,6 +27381,11 @@ function actualizarRadiacion(){
 
   // ── Legend ──────────────────────────────────────────────────────────
   _drawRadLegend(maxV);
+  // v12.2: la escala del falso color se guarda aparte para poder dibujarla
+  // de nuevo en el informe. En el panel es un <canvas> dentro de una
+  // columna flexible, una combinación que al imprimirse se descolocaba y
+  // perdía las marcas; en el informe se redibuja como SVG horizontal.
+  _radEscala = { max: maxV, unidad: 'kWh/m²', periodo: P.label, dias: P.dias };
 
   // ── Stats row ────────────────────────────────────────────────────────
   const sr = document.getElementById('radStatsRow');
@@ -27445,8 +27538,8 @@ function actualizarRadiacion(){
   if(rt) rt.innerHTML = `
     <div style="padding:3px 5px 3px;border-bottom:1px solid var(--border);font-size:.53rem;color:var(--text3)">
       <b style="color:var(--text2)">${pLbl}</b> · Máx <b style="color:#f84">${maxV.toFixed(P.dias>31?0:2)}</b> kWh/m²
-      · Media <b style="color:var(--accent)">${avgV.toFixed(P.dias>31?0:2)}</b> kWh/m²
-      ${P.dias>1?` · <b style="color:var(--text2)">${(avgV/P.dias).toFixed(2)}</b> kWh/m²·día`:''}
+      · Media <b style="color:var(--accent)">${avgExp.toFixed(P.dias>31?0:2)}</b> kWh/m²
+      ${P.dias>1?` · <b style="color:var(--text2)">${(avgPorDia).toFixed(2)}</b> kWh/m²·día`:''}
       ${sorted.length>80?` · ${sorted.length} sup (80 mostradas)`:''}
     </div>
     <table style="width:100%;border-collapse:collapse">
@@ -27471,6 +27564,39 @@ function actualizarRadiacion(){
 }
 
 // ── Legend bar ────────────────────────────────────────────────────────────
+// v12.2 — Escala activa del falso color, para reconstruirla en el informe.
+let _radEscala = null;
+
+// Paradas de color de la escala Ecotect, en un único sitio para que el
+// panel y el informe no puedan desincronizarse.
+const _RAD_STOPS = [
+  [0.00,  20, 20,160], [0.12,   0, 60,220], [0.25,   0,180,220],
+  [0.40,   0,210,100], [0.55, 160,230,  0], [0.68, 255,210,  0],
+  [0.82, 255, 90,  0], [1.00, 200,  0,  0]
+];
+
+// Barra de escala horizontal en SVG: vectorial, se imprime siempre y no
+// depende de que el navegador respete los fondos de los elementos.
+function _radEscalaSVG(maxV, ancho){
+  const W = ancho || 540, H = 13, TH = 16;   // barra + fila de rótulos
+  const paradas = _RAD_STOPS.map(([p,r,g,b]) =>
+    `<stop offset="${(p*100).toFixed(0)}%" stop-color="rgb(${r},${g},${b})"/>`).join('');
+  const nT = 6;
+  const ticks = [];
+  for(let i=0;i<=nT;i++){
+    const x = (W*i/nT), v = maxV*i/nT;
+    const anc = i===0 ? 'start' : (i===nT ? 'end' : 'middle');
+    ticks.push(`<line x1="${x.toFixed(1)}" y1="${H}" x2="${x.toFixed(1)}" y2="${H+3}" stroke="#8090a8" stroke-width="0.8"/>`);
+    ticks.push(`<text x="${x.toFixed(1)}" y="${H+TH-3}" text-anchor="${anc}" font-family="monospace" font-size="7.5" fill="#55606e">${
+      maxV>=100 ? v.toFixed(0) : v.toFixed(1)}</text>`);
+  }
+  return `<svg width="100%" viewBox="0 0 ${W} ${H+TH}" preserveAspectRatio="none" style="display:block;max-width:${W}px">
+    <defs><linearGradient id="radGrad" x1="0" y1="0" x2="1" y2="0">${paradas}</linearGradient></defs>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#radGrad)" stroke="#c8d0e0" stroke-width="0.6"/>
+    ${ticks.join('')}
+  </svg>`;
+}
+
 function _drawRadLegend(maxV){
   const cv = document.getElementById('radLegendCanvas');
   if(!cv) return;
@@ -27883,7 +28009,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.1</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.2</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -27954,6 +28080,32 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.2</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El informe de radiación perdía al
+          imprimirse toda su información gráfica.</strong> Sin
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">print-color-adjust</span> el navegador descarta los fondos al
+          imprimir, por ahorro de tinta. Aquí eso borraba justamente lo que hace legible la tabla: la
+          franja de color de cada superficie y la celda coloreada del total. El texto de colores sí
+          salía, de modo que el PDF parecía correcto y en realidad había perdido su escala visual.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">La escala de color no llegaba al
+          informe.</strong> En el panel es un <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">canvas</span> vertical de 200 px dentro de una
+          columna flexible; al imprimirse quedaba descolgada en otra página y sin marcas. Ahora se
+          redibuja en el informe como barra horizontal en SVG, con sus siete valores, justo debajo de
+          la vista 3D. Sin ella el falso color no se puede leer: se ve qué cara recibe más, pero no
+          cuánto.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El recuadro «Total media» salía en
+          blanco</strong> —texto blanco sobre un fondo que no existía—, porque el informe vuelca el HTML del
+          panel y este usa variables CSS del tema oscuro que en la ventana de impresión no estaban
+          definidas. Ahora se redefinen en su equivalente para papel.</li>
+        <li style="margin-bottom:7px">Además: el informe se llevaba la barra de herramientas de la
+          pestaña (albedo, casillas, indicador de estado) como si fuera contenido; las columnas de datos
+          desaparecían por un reparto de anchos mal resuelto; la cifra de media del encabezado de la
+          tabla no coincidía con la del resto del informe, por haber quedado sin actualizar en v11.9; y
+          el periodo aparecía repetido. Todo corregido, en vertical, con los encabezados de tabla
+          repetidos al cambiar de página.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.1</div>
