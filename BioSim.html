@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.0</title>
+<title>BioSim v12.1</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.0</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.1</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5597,7 +5597,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.0 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.1 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -24068,19 +24068,30 @@ function exportarHVACPDF(){
   const term = T('kwhCal')+T('kwhRef')+T('kwhLat');
   const elec = T('elecCal')+T('elecRef');
 
-  const filasHTML = f.map(x=>`
-    <tr style="border-bottom:1px solid #eef0f8">
-      <td style="padding:3px 7px;font-weight:600;white-space:nowrap">
-        <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${x.color};margin-right:5px"></span>${x.zona}</td>
-      <td style="padding:3px 7px;text-align:right;font-family:monospace">${nf(x.area,1)}</td>
-      <td style="padding:3px 7px;text-align:right;font-family:monospace">${nf(x.H)}</td>
-      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#c04010">${nf(x.kwCal,2)}</td>
-      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#2060c0">${nf(x.kwRef+x.kwLat,2)}</td>
-      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#c04010">${nf(x.kwhCal)}</td>
-      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#2060c0">${nf(x.kwhRef)}</td>
-      <td style="padding:3px 7px;text-align:right;font-family:monospace;color:#5090b0">${nf(x.kwhLat)}</td>
-      <td style="padding:3px 7px;text-align:right;font-family:monospace;font-weight:700">${nf(x.elecCal+x.elecRef)}</td>
-      <td style="padding:3px 7px;text-align:right;font-family:monospace;font-size:.9em;color:#778">${x.hCal} / ${x.hRef}</td>
+  // v12.1 — Dos tablas en vez de una de diez columnas. Son las dos
+  // preguntas distintas que se le hacen a un cálculo por cargas ideales
+  // —qué potencia hay que instalar y cuánta energía se consume al año— y
+  // separadas caben holgadas en vertical, que es el formato del resto de
+  // los informes de BioSim.
+  const _zona = x => `<td class="z"><span class="sw" style="background:${x.color}"></span>${x.zona}</td>`;
+
+  const filasPot = f.map(x=>`
+    <tr>
+      ${_zona(x)}
+      <td class="n">${nf(x.area,1)}</td>
+      <td class="n">${nf(x.H)}</td>
+      <td class="n cal">${nf(x.kwCal,2)}</td>
+      <td class="n ref">${nf(x.kwRef+x.kwLat,2)}</td>
+    </tr>`).join('');
+
+  const filasEne = f.map(x=>`
+    <tr>
+      ${_zona(x)}
+      <td class="n cal">${nf(x.kwhCal)}</td>
+      <td class="n ref">${nf(x.kwhRef)}</td>
+      <td class="n lat">${nf(x.kwhLat)}</td>
+      <td class="n tot">${nf(x.elecCal+x.elecRef)}</td>
+      <td class="n h">${x.hCal} / ${x.hRef}</td>
     </tr>`).join('');
 
   const w = window.open('','_blank');
@@ -24090,21 +24101,55 @@ function exportarHVACPDF(){
   w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
   <title>Estimación de cargas HVAC — BioSim</title>
   <style>
-    @page{size:A4 landscape;margin:14mm}
-    body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#223;margin:0;font-size:11px}
-    h1{font-size:19px;margin:0 0 3px;color:#0a2060}
-    table{width:100%;border-collapse:collapse;font-size:10px}
-    th{background:#eaf0ff;color:#0a2060;padding:4px 7px;text-align:right;font-size:9.5px}
-    th:first-child{text-align:left}
+    /* v12.1 — El resto de los informes de BioSim salen en «letter
+       portrait»; este era el único en «A4 landscape» y por eso aparecía
+       girado respecto a los demás: el diálogo de impresión arranca en
+       vertical y acababa encajando a la fuerza una maqueta apaisada. */
+    @page{ size: letter portrait; margin: 14mm 12mm; }
+    *,*::before,*::after{ box-sizing:border-box; margin:0; padding:0; }
+    body{ font-family:'Segoe UI',Arial,sans-serif; color:#1a2035;
+          font-size:9.5pt; line-height:1.45;
+          -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    h1{ font-size:16pt; margin:0 0 2px; color:#0a2060; font-weight:700; }
+    h2{ font-size:10pt; color:#0a2060; margin:13px 0 5px; font-weight:700;
+        text-transform:uppercase; letter-spacing:.05em;
+        border-bottom:1px solid #dce4f0; padding-bottom:3px;
+        break-after:avoid; page-break-after:avoid; }
+    /* Las tablas deben salir ENTERAS: ancho acotado, sin recortes y sin
+       partir una fila entre dos páginas. */
+    /* Reparto fijo: la columna de zona toma lo que necesita el nombre más
+       largo y las numéricas se reparten el resto por igual, de modo que
+       ninguna se estira por culpa de un encabezado largo. */
+    table{ width:100%; max-width:100%; border-collapse:collapse;
+           font-size:8.5pt; margin-bottom:2px; table-layout:fixed; }
+    table.t5 th:first-child{ width:26% }
+    table.t6 th:first-child{ width:22% }
+    th{ background:#eaf0ff; color:#0a2060; text-align:right;
+        font-size:7.5pt; font-weight:700; line-height:1.25;
+        border-bottom:1px solid #c8d4ea; }
+    th,td{ padding:3px 5px; overflow-wrap:break-word; }
+    th:first-child,td:first-child{ text-align:left; word-break:normal; }
+    tbody tr{ border-bottom:1px solid #eef0f8;
+              break-inside:avoid; page-break-inside:avoid; }
+    th small{ display:block; font-weight:400; font-size:6.8pt; color:#5a6a88; }
+    td.z{ font-weight:600; white-space:nowrap; }
+    td.n{ text-align:right; font-family:'Consolas','Courier New',monospace;
+          font-variant-numeric:tabular-nums; }
+    td.cal{ color:#c04010 } td.ref{ color:#2060c0 }
+    td.lat{ color:#5090b0 } td.tot{ font-weight:700 }
+    td.h{ font-size:7.5pt; color:#778 }
+    tr.total{ background:#eaf0ff; font-weight:700; border-top:1.5px solid #c8d4ea; }
+    .sw{ display:inline-block; width:8px; height:8px; border-radius:2px;
+         margin-right:5px; vertical-align:baseline; }
   </style></head><body>
   <h1>Estimación de cargas HVAC</h1>
-  <div style="color:#667;font-size:10px;border-bottom:2px solid #dce4f0;padding-bottom:6px;margin-bottom:9px">
+  <div style="color:#667;font-size:8.5pt;border-bottom:2px solid #dce4f0;padding-bottom:6px;margin-bottom:9px">
     Método de cargas ideales · ${sitio} · ${f.length} zona(s) térmica(s) ·
     ${new Date().toLocaleString('es')}
   </div>
 
   <div style="background:#fff4e0;border:1px solid #e0b870;border-radius:4px;padding:7px 10px;
-       font-size:10px;line-height:1.5;margin-bottom:10px">
+       font-size:8pt;line-height:1.5;margin-bottom:10px">
     <b>Cálculo preliminar.</b> Estima la potencia necesaria para sostener la consigna suponiendo un sistema
     sin pérdidas y de capacidad ilimitada. Linealiza la carga en torno al régimen libre
     (Q&nbsp;=&nbsp;H·ΔT) en lugar de resolver un balance con control hora a hora; controla sobre temperatura
@@ -24113,7 +24158,8 @@ function exportarHVACPDF(){
     Sirve para comparar alternativas de proyecto, no para seleccionar equipo.
   </div>
 
-  <div style="display:flex;gap:16px;margin-bottom:10px;font-size:10px">
+  <div style="display:flex;gap:14px;margin-bottom:4px;font-size:8.5pt;
+       break-inside:avoid;page-break-inside:avoid">
     <div><b style="color:#0a2060">Consignas</b><br>
       Calefacción ${R.tHeat} °C · Refrigeración ${R.tCool} °C<br>
       HR objetivo ${R.rhSet}%${R.hayRocio?` → W = ${(R.Wsp*1000).toFixed(1)} g/kg`:''}<br>
@@ -24125,23 +24171,58 @@ function exportarHVACPDF(){
       Consumo eléctrico <b>${nf(elec)} kWh<sub>e</sub></b>${areaT>0?` · ${nf(elec/areaT,1)} kWh/m²·año`:''}</div>
   </div>
 
-  <table>
-    <tr><th>Zona</th><th>Área m²</th><th>H W/K</th><th>Pico cal. kW</th><th>Pico ref. kW</th>
-        <th>Calef. kWh</th><th>Refrig. kWh</th><th>Latente kWh</th><th>Eléctrico kWh</th><th>h cal/ref</th></tr>
-    ${filasHTML}
-    <tr style="background:#eaf0ff;font-weight:700">
-      <td style="padding:4px 7px">TOTAL</td>
-      <td style="padding:4px 7px;text-align:right;font-family:monospace">${nf(areaT,1)}</td>
-      <td></td><td></td><td></td>
-      <td style="padding:4px 7px;text-align:right;font-family:monospace;color:#c04010">${nf(T('kwhCal'))}</td>
-      <td style="padding:4px 7px;text-align:right;font-family:monospace;color:#2060c0">${nf(T('kwhRef'))}</td>
-      <td style="padding:4px 7px;text-align:right;font-family:monospace;color:#5090b0">${nf(T('kwhLat'))}</td>
-      <td style="padding:4px 7px;text-align:right;font-family:monospace">${nf(elec)}</td>
-      <td></td>
-    </tr>
+  <h2>Potencia pico por zona</h2>
+  <table class="t5">
+    <thead><tr>
+      <th>Zona</th>
+      <th>Superficie<small>m²</small></th>
+      <th>Conductancia total H<small>W/K</small></th>
+      <th>Pico de calefacción<small>kW</small></th>
+      <th>Pico de refrigeración<small>kW · sensible + latente</small></th>
+    </tr></thead>
+    <tbody>
+      ${filasPot}
+      <tr class="total">
+        <td>TOTAL</td>
+        <td class="n">${nf(areaT,1)}</td>
+        <td class="n">${nf(T('H'))}</td>
+        <td class="n cal">${nf(T('kwCal'),2)}</td>
+        <td class="n ref">${nf(T('kwRef')+T('kwLat'),2)}</td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="font-size:7.5pt;color:#667;margin-bottom:4px">
+    Los picos de cada zona no ocurren a la misma hora, así que su suma es una
+    cota superior: un equipo centralizado se dimensiona por el pico del conjunto,
+    no por la suma de los picos.
+  </div>
+
+  <h2>Demanda anual por zona</h2>
+  <table class="t6">
+    <thead><tr>
+      <th>Zona</th>
+      <th>Calefacción<small>kWh térmicos</small></th>
+      <th>Refrigeración sensible<small>kWh térmicos</small></th>
+      <th>Refrigeración latente<small>kWh térmicos</small></th>
+      <th>Consumo eléctrico<small>kWh · tras COP</small></th>
+      <th>Horas<small>cal. / ref.</small></th>
+    </tr></thead>
+    <tbody>
+      ${filasEne}
+      <tr class="total">
+        <td>TOTAL</td>
+        <td class="n cal">${nf(T('kwhCal'))}</td>
+        <td class="n ref">${nf(T('kwhRef'))}</td>
+        <td class="n lat">${nf(T('kwhLat'))}</td>
+        <td class="n tot">${nf(elec)}</td>
+        <td></td>
+      </tr>
+    </tbody>
   </table>
 
-  <div style="font-size:9px;color:#667;line-height:1.5;margin-top:9px;border-top:1px solid #dce4f0;padding-top:6px">
+  <div style="font-size:7.5pt;color:#667;line-height:1.5;margin-top:11px;
+       border-top:1px solid #dce4f0;padding-top:6px;
+       break-inside:avoid;page-break-inside:avoid">
     <b>Formulación.</b> Carga sensible Q = H·(T_consigna − T_libre), con
     H = ΣU·A (envolvente) + ΣY·A (masa térmica) + ṁ·Cp (ventilación e infiltración).
     ${R.hayRocio
@@ -26275,7 +26356,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.0
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.1
   </div>
 </div>
 <script>
@@ -27802,7 +27883,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.0</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.1</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -27873,6 +27954,19 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.1</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El informe PDF de HVAC salía
+          girado.</strong> Era el único de BioSim maquetado en
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">A4 apaisado</span>; el resto usa
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">carta vertical</span>, y como el diálogo de impresión arranca
+          en vertical, la maqueta apaisada acababa encajada a la fuerza. Ahora va en vertical como los
+          demás, y la tabla de diez columnas se reparte en dos —<em>potencia pico</em> y
+          <em>demanda anual</em>—, que son las dos preguntas distintas que se le hacen a un cálculo por
+          cargas ideales y caben holgadas a lo ancho. Los encabezados se repiten al cambiar de página,
+          ninguna fila se parte entre dos hojas y los colores de zona se imprimen.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.0</div>
