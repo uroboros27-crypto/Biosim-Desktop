@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.5</title>
+<title>BioSim v12.7</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.5</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.7</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5039,6 +5039,7 @@ canvas#cv{display:block;}
             </div>
           </div>
           <div style="font-size:.5rem;color:var(--text3);font-family:monospace" id="rStatMeta"></div>
+          <div style="font-size:.5rem;color:var(--text3);font-family:monospace;margin-top:2px;line-height:1.5;opacity:.9" id="rStatMeta2"></div>
         </div>
 
         <!-- ── MAIN: LEGEND + TABLE ── -->
@@ -5602,7 +5603,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.5 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.7 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -26613,7 +26614,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.5
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.7
   </div>
 </div>
 <script>
@@ -27075,6 +27076,7 @@ async function calcularRadiacion(){
         'del 0,2 % de la difusa anual, así que no mueve los resultados.', 'info');
   }
   _radModeloCielo = _perezOK ? 'Perez anisótropo' : 'isótropo (Liu–Jordan)';
+  _radVistaCielo  = usarSVF ? 'medida' : 'hemisferio despejado';
   if(usarSVF && (_svfCacheDirty || !_svfCache)){
     setStatus('Vista al cielo…');
     await buildSkyViewFactors(extSurfs.filter(s => s.exterior), p => setStatus(`Vista al cielo ${p}%…`));
@@ -27639,11 +27641,28 @@ function actualizarRadiacion(){
   if(el('rStatTot')) el('rStatTot').textContent = avgExp.toFixed(0);
   if(el('rStatMeta')) el('rStatMeta').textContent =
     `${pLbl} · Máx ${maxV.toFixed(P.dias>31?0:2)} kWh/m² · ρ=${rho} · ` +
-    `cielo ${_radModeloCielo} · ` +
+    `cielo ${_radModeloCielo} · vista al cielo ${_radVistaCielo} · ` +
     `${_base.length} sup. exteriores de ${extSurfs.length}` +
     (_nOcultas > 0 ? ` (${_nOcultas} fuera de la media: pisos e interiores)` : '') +
     ' · media ponderada por área' +
     (P.dias > 1 ? ` · media diaria ${avgPorDia.toFixed(2)} kWh/m²·día` : '');
+
+  // v12.6 — Qué significa, en una frase, cada uno de los dos ajustes que
+  // cambian el resultado. El encabezado dice CUÁL se usó; esta línea dice
+  // QUÉ implica, que es lo que necesita quien recibe la lámina impresa sin
+  // haber estado delante del programa.
+  if(el('rStatMeta2')) el('rStatMeta2').textContent =
+    (_radVistaCielo === 'medida'
+      ? 'Vista al cielo ACTIVA: la difusa y la reflejada de cada superficie se ponderan con el cielo y el '
+      + 'terreno que ve realmente, medidos lanzando rayos contra la geometría sobre 145 parches de Tregenza. '
+      + 'Aleros, voladizos, edificios vecinos y el propio volumen la reducen.'
+      : 'Vista al cielo INACTIVA: la difusa y la reflejada suponen el hemisferio despejado, (1+cos β)/2, '
+      + 'como si no hubiera nada delante. Ninguna obstrucción las reduce, ni siquiera la propia geometría '
+      + 'del edificio, de modo que toda superficie con la misma inclinación recibe lo mismo.')
+    + (_radModeloCielo.startsWith('Perez')
+      ? ' · Cielo de Perez: la difusa se reparte en fondo isótropo, aureola circunsolar y brillo de horizonte '
+      + 'según la claridad del cielo de cada hora.'
+      : ' · Cielo isótropo: misma radiancia en toda la bóveda, es también el supuesto del balance térmico.');
 
   // ── Surface table ────────────────────────────────────────────────────
   const sorted = extSurfs.map((s,i) => ({s, v:vals[i]})).sort((a,b) => b.v - a.v);
@@ -27772,6 +27791,12 @@ let _radEscala = null;
 // Lo fija calcularRadiacion() y lo declara el encabezado del informe, para
 // que una lámina impresa diga siempre con qué modelo se obtuvo.
 let _radModeloCielo = 'isótropo (Liu–Jordan)';
+// v12.6 — Modo de factor de vista al cielo con el que se calcularon los
+// resultados vigentes. Cambia la difusa y la reflejada mucho más que el
+// modelo de cielo —medido: un alero de 1,5 m recorta la difusa de una
+// fachada un 65 %, frente al 12 % que mueve pasar de isótropo a Perez—,
+// así que una lámina impresa tiene que decir cuál estaba activo.
+let _radVistaCielo = 'medida';
 
 // Paradas de color de la escala Ecotect, en un único sitio para que el
 // panel y el informe no puedan desincronizarse.
@@ -28215,7 +28240,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.5</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.7</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -28294,6 +28319,33 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.7</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Guía de uso de los dos ajustes solares</strong>,
+          arriba en esta misma ventana y, desarrollada y con las mediciones, en el manual técnico.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Dos errores del manual técnico.</strong>
+          Decía que el análisis usaba el «modelo de tres componentes ASHRAE HOF (Perez-HDKR simplificado)»,
+          lo que <b>nunca fue cierto</b>: lo implementado era el isótropo de Liu–Jordan y Perez no llegó hasta
+          v12.3. Y definía <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">β</span> como la inclinación «respecto a la vertical» cuando la
+          fórmula <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">(1+cos β)/2</span> la mide <b>respecto a la horizontal</b> — β = 0° en una
+          cubierta plana, 90° en un muro—, de modo que quien siguiera el manual para comprobar un número a
+          mano obtenía el complementario.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.6</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El informe de radiación no decía si
+          «Vista al cielo» estaba activa.</strong> Declaraba el modelo de cielo pero no el otro ajuste que
+          cambia el resultado, y cambia mucho más: medido sobre una caja con un alero de 1,5 m, la difusa
+          de la fachada protegida pasa de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">409 a 143 kWh/m²</span> (−65 %) al activarlo,
+          frente al 12 % que mueve pasar de cielo isótropo a Perez. El dato solo constaba en el registro
+          de la aplicación, que no se imprime: dos láminas con cifras muy distintas podían parecer el
+          mismo análisis. Ahora el encabezado lo declara y una segunda línea explica qué implica cada
+          estado — con el factor medido por trazado de rayos, o con el hemisferio despejado
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">(1+cos β)/2</span>, donde ninguna obstrucción cuenta, ni siquiera
+          la propia geometría del edificio.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.5</div>
@@ -28486,6 +28538,34 @@ function mostrarAcercaDeNuevo(){
           superficies etiquetadas <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">piso</span> e ignoraban las
           <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">losa</span>, cayendo a un sustituto de V/3.</li>
       </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Cómo elegir los ajustes del análisis solar</div>
+      <div style="background:var(--bg3);border-left:3px solid var(--accent2);border-radius:5px;padding:11px 15px;margin-bottom:10px;line-height:1.7">
+        <b style="color:var(--text)">Vista al cielo: déjela activa.</b> Pesa mucho más que el modelo de cielo.
+        Desactivarla supone que el edificio no se da sombra a sí mismo: la difusa de una fachada bajo un alero
+        de 1,5 m pasa de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">409 a 143 kWh/m²</span> al activarla, un 65 %, frente al 12 % que mueve
+        cambiar de modelo de cielo. Apáguela solo para enseñar el antes y el después, para ganar tiempo en un
+        modelo muy grande, o para <b>diagnosticar</b>: si una fachada da una difusa rara, apagarla separa un
+        problema de geometría —una normal invertida— de uno del modelo de cielo.
+      </div>
+      <div style="background:var(--bg3);border-left:3px solid var(--accent2);border-radius:5px;padding:11px 15px;margin-bottom:10px;line-height:1.7">
+        <b style="color:var(--text)">Modelo de cielo: según la escala temporal.</b> El isótropo da a todas las
+        superficies con la misma inclinación la misma difusa, miren a donde miren. En el promedio anual eso se
+        compensa en buena parte; en un día concreto, no: el 13 de mayo, el más despejado del año en Vijes, el
+        isótropo asigna <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">0,48 kWh/m²</span> a las cuatro orientaciones, mientras que Perez las
+        separa entre 0,43 y 0,65 — un 50 % de diferencia entre ellas.
+        <br><br>
+        <b style="color:var(--text)">Perez</b> para estudios de <b>un día o un rango</b>, diseño de protecciones
+        solares, la hora crítica y las fachadas este y oeste. <b style="color:var(--text)">Isótropo</b> cuando el
+        resultado vaya a compararse con el <b>balance térmico o el módulo HVAC</b>, que comparten ese supuesto.
+        Para <b>totales anuales</b> la elección importa poco: la diferencia, del 6 al 8 %, queda por debajo de la
+        incertidumbre del albedo supuesto y de la ausencia de interreflexión, y rara vez cambia el <em>orden</em>
+        entre alternativas de proyecto.
+        <br><br>
+        Lo que sí importa: <b style="color:var(--text)">no mezclarlos dentro de un mismo estudio</b>. Dos
+        alternativas calculadas con modelos distintos no son comparables, y la diferencia entre ellas puede ser
+        menor que la diferencia entre modelos. El encabezado del informe declara siempre los dos ajustes.
+      </div>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Limitaciones conocidas</div>
       <ul style="padding-left:20px;margin:8px 0">
@@ -28816,8 +28896,10 @@ U_iso = (2·λ/π·B_pe + d_te) · ln(π·B_pe/d_te + 1)       si d_te < B_pe
     `)}
 
     ${SECCION('☀ Análisis de Radiación Solar Incidente', `
-      El cálculo de irradiancia sobre cada superficie usa el <strong>modelo de tres componentes ASHRAE HOF
-      (Perez-HDKR simplificado)</strong>:
+      El cálculo de irradiancia sobre cada superficie descompone la radiación en <strong>tres componentes</strong>
+      —directa, difusa del cielo y reflejada del suelo— y ofrece <strong>dos modelos de cielo</strong> para la
+      segunda. (Hasta v12.6 este párrafo decía «Perez-HDKR simplificado», lo que nunca fue cierto: lo
+      implementado era el isótropo de Liu–Jordan, y Perez no llegó hasta v12.3.)
       ${CODEBLK(`I_dir = DNI · cos θ · f_sombra            [directa proyectada con sombras]
 I_dif = DHI · (1 + cos β) / 2              [difusa isótropa Liu-Jordan]
 I_dif = DHI · [(1-F1)·(1+cos β)/2
@@ -28827,8 +28909,53 @@ I_dif = DHI · [(1-F1)·(1+cos β)/2
 I_ref = GHI · ρ_albedo · (1 − cos β) / 2   [reflejada del suelo - factor suelo]
 I_total = I_dir + I_dif + I_ref`)}
       donde <strong>θ</strong> es el ángulo de incidencia entre el rayo solar y la normal de la superficie,
-      <strong>β</strong> la inclinación de la superficie respecto a la vertical, y <strong>ρ</strong> el albedo
+      <strong>β</strong> la inclinación de la superficie respecto a la <strong>horizontal</strong>
+      (β = 0° en una cubierta plana, β = 90° en un muro vertical), y <strong>ρ</strong> el albedo
       del entorno (default 0.20, configurable). DNI/DHI/GHI provienen del archivo EPW.
+      <br><br>
+      <strong>Cuándo usar cada modelo de cielo.</strong> Los dos están disponibles como casilla; la decisión
+      depende de la escala temporal del estudio, no de cuál es «mejor».
+      <br><br>
+      El isótropo reparte la difusa por igual sobre la bóveda, de modo que <em>todas las superficies con la
+      misma inclinación reciben lo mismo</em>, mire cada una a donde mire. En un promedio anual eso se
+      compensa en buena parte; en un día concreto, no. Medido con el EPW de Vijes, difusa del día en kWh/m²:
+      ${CODEBLK(`13 MAY  (el día más despejado)      isótropo    Perez
+  Norte                               0,48      0,63    +32 %
+  Sur                                 0,48      0,43     −9 %
+  Este                                0,48      0,65    +36 %
+  Oeste                               0,48      0,64    +34 %
+
+ 3 FEB  (el día más cubierto)
+  las cuatro orientaciones            0,55      0,47    −15 %`)}
+      El isótropo da 0,48 a las cuatro fachadas: no distingue orientaciones. El cielo real de un día
+      despejado reparte entre ellas un 50 % de diferencia. Con cielo cubierto la radiancia sí es casi
+      uniforme, y Perez solo aplica la corrección del cielo nublado CIE, que baja las verticales un 15 %
+      respecto al reparto isótropo.
+      <br><br>
+      <strong>Use Perez</strong> para estudios de <strong>un día o un rango</strong> —que es justo para lo que
+      están los modos «día» y «rango»—, para diseño de protecciones solares, para la hora crítica y para
+      fachadas este y oeste, donde la diferencia en el pico llega a 122 y 134 W/m².
+      <br><br>
+      <strong>Use el isótropo</strong> cuando el resultado vaya a compararse con el <strong>balance térmico o el
+      módulo HVAC</strong>. El motor térmico asigna <span style="font-family:var(--font-mono)">0,5·IDH</span> a un muro vertical y
+      <span style="font-family:var(--font-mono)">IDH</span> a una cubierta plana, que son exactamente los valores de Liu–Jordan: con el
+      isótropo seleccionado los dos motores comparten supuesto, con Perez no.
+      <br><br>
+      <strong>Para totales anuales la elección importa poco.</strong> La diferencia en verticales es del 6 al 8 %,
+      por debajo de la incertidumbre de otras cosas del modelo —el albedo supuesto, la ausencia de
+      interreflexión, el suelo tratado como reflector isótropo—. Comparando alternativas de proyecto, el
+      modelo rara vez cambia el <em>orden</em> entre opciones; cambia el valor absoluto más que la decisión.
+      Lo que sí importa es <strong>no mezclarlos dentro de un mismo estudio</strong>: dos alternativas calculadas con
+      modelos distintos no son comparables, y la diferencia entre ellas puede ser menor que la diferencia
+      entre modelos. El encabezado del informe declara siempre cuál se usó.
+      <br><br>
+      <strong>Factor de vista al cielo: déjelo activo.</strong> Esta casilla pesa mucho más que el modelo de cielo.
+      Desactivarla equivale a suponer que el edificio no se da sombra a sí mismo: medido, la difusa de una
+      fachada bajo un alero de 1,5 m pasa de 409 a 143 kWh/m² al activarla (−65 %), frente al 12 % que mueve
+      cambiar de modelo de cielo. Las únicas razones para apagarla no son de cálculo: enseñar mostrando el
+      antes y el después, ganar tiempo en un modelo muy grande, y <strong>diagnosticar</strong> — si una fachada sale
+      con difusa anómala, apagarla separa un problema de geometría, como una normal invertida, de un
+      problema del modelo de cielo.
       <br><br>
       <strong>Sombreado por ray-casting</strong>. Para cada hora del año y cada superficie exterior, se lanza un
       rayo desde su centroide hacia la posición solar. Si el rayo intersecta otra malla, esa hora se registra como
