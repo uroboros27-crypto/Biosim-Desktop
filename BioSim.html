@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.4</title>
+<title>BioSim v12.5</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.4</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.5</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5602,7 +5602,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.4 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.5 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -11922,6 +11922,25 @@ function selectSurf(id,e){
 // ═══════════════════════════════════════
 // PROPERTIES PANELS
 // ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+// 🧱  RÓTULOS DE CONTORNO DEL PAQUETE CONSTRUCTIVO (v12.5)
+// ═══════════════════════════════════════════════════════════════════════
+// Las capas se listan de fuera hacia dentro, en VERTICAL. Rotular eso con
+// una sola línea horizontal encima del listado («← EXT · · · INT →»)
+// obliga a traducir un eje en otro: el texto dice izquierda-derecha y el
+// listado va arriba-abajo. Los rótulos van donde está la cara que nombran,
+// uno encima y otro debajo, y el listado queda encerrado entre los dos
+// ambientes, que es el modelo mental del cerramiento.
+//
+// Se definen aquí, una sola vez, porque el panel de UNA superficie y el de
+// SELECCIÓN MÚLTIPLE pintan el mismo listado. Estaban duplicados, y por eso
+// un ajuste anterior acabó aplicándose solo en uno de los dos.
+const _CAP_BASE = 'display:flex;align-items:center;gap:7px;font-size:.55rem;'
+                + 'color:var(--text3);font-family:var(--font-mono);letter-spacing:.09em';
+const _RULE     = '<span style="flex:1;height:1px;background:var(--border)"></span>';
+const CAP_EXT = `<div style="${_CAP_BASE};margin:0 0 4px">EXTERIOR${_RULE}</div>`;
+const CAP_INT = `<div style="${_CAP_BASE};margin:4px 0 0">INTERIOR${_RULE}</div>`;
+
 function showSurfProps(surf){
   // Si hay selección múltiple, delegar a la vista multi.
   // (Se sigue aceptando 'surf' como argumento para llamadas existentes que
@@ -12072,9 +12091,10 @@ function showSurfProps(surf){
     </div>`).join('');
   document.getElementById('rConstContent').innerHTML=`
     <div style="font-size:.68rem;font-weight:700;color:var(--text3);margin-bottom:6px">${surf.name}</div>
-    <div style="font-size:.6rem;color:var(--text3);margin-bottom:5px;font-family:var(--font-mono)">← EXT · · · INT →</div>
+    ${CAP_EXT}
     ${lHtml}
-    <button class="btn btn-g btn-xs" style="width:100%;margin-top:5px" onclick="addSurfLayer('${surf.id}')">＋ Capa</button>
+    ${CAP_INT}
+    <button class="btn btn-g btn-xs" style="width:100%;margin-top:7px" onclick="addSurfLayer('${surf.id}')">＋ Capa</button>
     <div class="chip" style="margin-top:8px"><span class="cl">U total</span><span class="cv ${uc}">${p.U.toFixed(3)} W/m²K</span></div>
     <div class="chip" style="margin-top:3px"><span class="cl">R total</span><span class="cv">${p.R.toFixed(3)} m²K/W</span></div>`;
 
@@ -12372,7 +12392,7 @@ function _renderMultiConstructions(surfs){
     html += `<div style="font-size:.6rem;color:#393;background:rgba(80,200,150,0.10);border:1px solid rgba(80,200,150,0.35);border-radius:4px;padding:5px 8px;margin-bottom:8px">
       ✓ Plantilla de capas uniforme. Los cambios se aplican a todas las superficies.
     </div>
-    <div style="font-size:.6rem;color:var(--text3);margin-bottom:5px;font-family:var(--font-mono)">← EXT · · · INT →</div>`;
+    ${CAP_EXT}`;
 
     refLayers.forEach((l, li) => {
       const eUni = eUniform[li];
@@ -12390,7 +12410,8 @@ function _renderMultiConstructions(surfs){
         <button class="le-d" onclick="editLayerDeleteMulti(${li})" title="Eliminar esta capa en todas las superficies">✕</button>
       </div>`;
     });
-    html += `<button class="btn btn-g btn-xs" style="width:100%;margin-top:5px" onclick="editLayerAddMulti()">＋ Añadir capa a todas</button>`;
+    html += CAP_INT;
+    html += `<button class="btn btn-g btn-xs" style="width:100%;margin-top:7px" onclick="editLayerAddMulti()">＋ Añadir capa a todas</button>`;
 
     // U-value: mostrar agregado
     const us = surfs.map(s => calcParams(s.layers).U);
@@ -26592,7 +26613,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.4
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.5
   </div>
 </div>
 <script>
@@ -28194,7 +28215,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.4</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.5</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -28273,6 +28294,18 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.5</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Rótulos del paquete constructivo.</strong>
+          Las capas se listan en vertical, de fuera hacia dentro, pero el rótulo iba en una sola línea
+          horizontal encima del listado —<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">← EXT · · · INT →</span>—, lo que obligaba a traducir un eje
+          en otro. Ahora <strong style="color:var(--text)">EXTERIOR</strong> encabeza el listado e
+          <strong style="color:var(--text)">INTERIOR</strong> lo cierra, de modo que cada rótulo cae donde está la cara
+          que nombra. Se habían ajustado antes y se perdieron porque el panel de una superficie y el de
+          selección múltiple tenían el rótulo <em>duplicado</em>; ahora se define una sola vez y los dos
+          paneles lo comparten, que es lo que evita que vuelva a descuadrarse.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Novedades de v12.3 · afinado en v12.4</div>
