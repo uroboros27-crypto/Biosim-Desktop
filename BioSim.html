@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.2</title>
+<title>BioSim v12.3</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.2</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.3</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5003,6 +5003,11 @@ canvas#cv{display:block;}
             <input type="checkbox" id="radUseSVF" checked style="cursor:pointer" onchange="invalidateSVFCache()">
             Vista al cielo
           </label>
+          <label style="display:flex;align-items:center;gap:3px;cursor:pointer;font-size:.6rem;color:var(--text2);padding:2px 5px;background:var(--bg3);border:1px solid var(--border);border-radius:4px"
+            title="Cielo anisótropo de Perez et al. (1990) en lugar del isótropo de Liu-Jordan. Reparte la difusa en tres componentes —fondo isótropo, aureola circunsolar y brillo de horizonte— según la claridad y el brillo del cielo de cada hora, leídos del propio EPW. Afecta SOLO a este análisis de radiación incidente: el balance térmico usa la difusa simplificada del método de las admitancias CIBSE.">
+            <input type="checkbox" id="radPerez" style="cursor:pointer" onchange="actualizarRadiacion()">
+            Cielo Perez
+          </label>
           <button class="btn btn-g btn-xs" onclick="resetRadColormap()" title="Restaurar colores originales">↺</button>
           <button class="btn btn-g btn-xs" id="bRadPdfBtn" onclick="exportTabPDF('bRad','Radiación Solar Incidente — BioSim')">⬇ PDF</button>
 
@@ -5597,7 +5602,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.2 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.3 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -18233,6 +18238,122 @@ function reclasificarInteriores(silencioso){
   return cambiadas.length;
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// ☀  CIELO ANISÓTROPO DE PEREZ (v12.3)
+// ═══════════════════════════════════════════════════════════════════════
+// Perez, Ineichen, Seals, Michalsky y Stewart (1990), «Modeling daylight
+// availability and irradiance components from direct and global
+// irradiance», Solar Energy 44(5), pp. 271-289.
+//
+// El modelo isotrópico de Liu–Jordan reparte la difusa por igual sobre
+// toda la bóveda: cualquier superficie vertical recibe la mitad de la
+// difusa horizontal, mire a donde mire. El cielo real no se comporta así.
+// Perez lo descompone en tres piezas y reparte la difusa entre ellas
+// según dos índices que se calculan hora a hora del propio EPW:
+//
+//   ε  CLARIDAD   — (DHI+DNI)/DHI corregido por el cenital. Vale 1 con
+//                   cielo totalmente cubierto y pasa de 6 con cielo muy
+//                   despejado.
+//   Δ  BRILLO     — m·DHI/I0. Mide cuánta difusa hay en relación con lo
+//                   que llega al borde de la atmósfera.
+//
+//   I_dif = DHI · [ (1−F1)·(1+cos β)/2   ← fondo isótropo
+//                 + F1·a/b               ← aureola circunsolar
+//                 + F2·sin β ]           ← brillo de horizonte
+//
+// con a = max(0, cos θ), b = max(cos 85°, cos θz), y F1, F2 interpolados
+// de una tabla de 48 coeficientes en ocho intervalos de ε.
+//
+// Propiedad que sirve de prueba de contraste: sobre superficie HORIZONTAL
+// (β = 0) la expresión se reduce a DHI exactamente, porque el modelo está
+// anclado a la difusa medida en el plano horizontal. _perezAutoPrueba()
+// lo comprueba.
+//
+// Tabla de Perez et al. (1990), tal como la reproducen Duffie & Beckman,
+// «Solar Engineering of Thermal Processes», §2.16.
+const _PEREZ_EPS = [1.065, 1.23, 1.5, 1.95, 2.8, 4.5, 6.2, Infinity];
+const _PEREZ_F = [
+  [-0.008,  0.588, -0.062, -0.060,  0.072, -0.022],
+  [ 0.130,  0.683, -0.151, -0.019,  0.066, -0.029],
+  [ 0.330,  0.487, -0.221,  0.055, -0.064, -0.026],
+  [ 0.568,  0.187, -0.295,  0.109, -0.152, -0.014],
+  [ 0.873, -0.392, -0.362,  0.226, -0.462,  0.001],
+  [ 1.132, -1.237, -0.412,  0.288, -0.823,  0.056],
+  [ 1.060, -1.600, -0.359,  0.264, -1.127,  0.131],
+  [ 0.678, -0.327, -0.250,  0.156, -1.377,  0.251]
+];
+
+// Coeficientes de la hora. Dependen solo del estado del cielo, no de la
+// superficie, así que se calculan UNA vez por hora y se reutilizan para
+// todas las superficies: el coste dentro del bucle es de tres productos.
+//   thz: ángulo cenital en radianes · doy: día del año 1..365
+function perezHora(DNI, DHI, thz, doy){
+  if(DHI <= 0) return null;
+  const K = 1.041, t3 = K*thz*thz*thz;
+  const eps = ((DHI + DNI)/DHI + t3) / (1 + t3);
+  let b = 0; while(eps > _PEREZ_EPS[b]) b++;
+  const I0 = 1367 * (1 + 0.033*Math.cos(doy*2*Math.PI/365));
+  // Masa de aire de Kasten–Young (1989): válida hasta el horizonte, a
+  // diferencia de 1/cos θz, que diverge con el sol rasante.
+  const altG = 90 - thz*180/Math.PI;
+  const m = 1 / (Math.cos(thz) + 0.50572*Math.pow(Math.max(0.1, altG + 6.07995), -1.6364));
+  const D = m * DHI / I0;
+  const f = _PEREZ_F[b];
+  return {
+    F1: Math.max(0, f[0] + f[1]*D + f[2]*thz),   // fracción circunsolar
+    F2: f[3] + f[4]*D + f[5]*thz,                // brillo de horizonte
+    eps, delta: D, bin: b + 1,
+    cosThzLim: Math.max(Math.cos(85*Math.PI/180), Math.cos(thz))
+  };
+}
+
+// Difusa sobre una superficie inclinada, con las obstrucciones medidas.
+//
+// Con cielo isótropo un solo factor de vista al cielo bastaba. Con Perez
+// no, porque las tres piezas vienen de sitios distintos de la bóveda:
+//
+//   · fondo isótropo  → le corresponde el factor de vista al cielo
+//                       medido por trazado de rayos (vfCielo);
+//   · circunsolar     → sale del entorno del disco solar, así que lo que
+//                       le corresponde es el FACTOR DE SOMBRA de la hora:
+//                       un alero que tapa el sol tapa también su aureola;
+//   · horizonte       → se concentra en la banda baja de la bóveda, la
+//                       que tapan los edificios vecinos. Se pondera con
+//                       el factor de vista al cielo, que la sobreestima
+//                       algo en entorno urbano denso (ver «Acerca de»).
+//
+// cosB = coseno de la inclinación (normal.y) · cosInc = coseno del ángulo
+// de incidencia del sol · sf = factor de sombra de esa hora (0..1).
+function perezDifusa(DHI, ph, cosB, cosInc, vfCielo, sf){
+  if(!ph || DHI <= 0) return 0;
+  const cb  = Math.max(-1, Math.min(1, cosB));
+  const sinB = Math.sqrt(Math.max(0, 1 - cb*cb));
+  const vfAnalitico = (1 + cb)/2;                 // hemisferio despejado
+  // Proporción de cielo que la superficie ve realmente frente a lo que
+  // vería despejada. Permite aplicar la obstrucción a cada pieza.
+  const obstr = vfAnalitico > 1e-6 ? Math.max(0, Math.min(1, vfCielo/vfAnalitico)) : 0;
+  const iso  = (1 - ph.F1) * vfAnalitico * obstr;
+  const circ = ph.F1 * Math.max(0, cosInc) / ph.cosThzLim * Math.max(0, Math.min(1, sf));
+  const hor  = ph.F2 * sinB * obstr;
+  return Math.max(0, DHI * (iso + circ + hor));
+}
+
+// Prueba de contraste: sobre plano horizontal el modelo debe devolver la
+// difusa horizontal medida, exactamente. Si esto falla, la tabla de
+// coeficientes o la formulación están mal copiadas.
+function _perezAutoPrueba(){
+  const casos = [[900,90,45,172],[0,300,45,15],[600,250,70,300],[950,60,20,200]];
+  let peor = 0;
+  casos.forEach(([dni,dhi,altDeg,doy])=>{
+    const thz = (90-altDeg)*Math.PI/180;
+    const ph  = perezHora(dni,dhi,thz,doy);
+    const v   = perezDifusa(dhi, ph, 1, Math.cos(thz), 1, 1);  // β=0 → vf=1
+    peor = Math.max(peor, Math.abs(v - dhi));
+  });
+  return peor;
+}
+
 // ── Sun unit vector from solar angles ────────────────────────────
 // Returns THREE.Vector3 pointing FROM scene origin TOWARD the sun
 // Coordinate system: X=East, Y=Up, Z=South (Three.js default)
@@ -26444,7 +26565,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.2
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.3
   </div>
 </div>
 <script>
@@ -26885,6 +27006,19 @@ async function calcularRadiacion(){
 
   // ── v7.3: factor de vista al cielo por obstrucción ───────────────────
   const usarSVF = document.getElementById('radUseSVF')?.checked !== false;
+  // v12.3 — Cielo anisótropo de Perez, opcional.
+  // Antes de usarlo se le pasa su propia prueba de contraste: sobre plano
+  // horizontal debe devolver la difusa horizontal medida, exactamente. Si
+  // no la supera, la tabla de coeficientes o la formulación están mal y es
+  // preferible calcular con el isótropo que con un modelo roto.
+  const _perezPedido = document.getElementById('radPerez')?.checked === true;
+  const _perezErr    = _perezPedido ? _perezAutoPrueba() : 0;
+  const _perezOK     = _perezPedido && _perezErr < 1e-6;
+  if(_perezPedido && !_perezOK){
+    log(`⚠ El modelo de Perez no supera su prueba de contraste (error ${_perezErr.toFixed(4)} W/m² `+
+        'sobre plano horizontal). Se calcula con cielo isótropo.', 'err');
+  }
+  _radModeloCielo = _perezOK ? 'Perez anisótropo' : 'isótropo (Liu–Jordan)';
   if(usarSVF && (_svfCacheDirty || !_svfCache)){
     setStatus('Vista al cielo…');
     await buildSkyViewFactors(extSurfs.filter(s => s.exterior), p => setStatus(`Vista al cielo ${p}%…`));
@@ -26995,6 +27129,12 @@ async function calcularRadiacion(){
         // convención del visor 3D, el diagrama solar y el caché de sombras.
         const sunDir = sunVector(sd.alt, sd.az + northAngle);
 
+        // v12.3: coeficientes de Perez de esta hora. Dependen del estado
+        // del cielo, no de la superficie, así que se calculan una sola vez
+        // y se reparten entre todas las superficies del bucle interior.
+        const _thz = (90 - sd.alt) * Math.PI / 180;
+        const _ph  = _perezOK ? perezHora(DNI, DHI, _thz, doy) : null;
+
         for(const s of extSurfs){
           const sg = surfGeom.get(s.id);
           if(!sg) continue;
@@ -27008,15 +27148,20 @@ async function calcularRadiacion(){
           if(s.exterior){
             // ── A. Direct ────────────────────────────────────────────────
             const cosTheta = sg.normal.dot(sunDir);   // cos(angle of incidence)
+            // v12.3: el factor de sombra se necesita también para la
+            // aureola circunsolar de Perez, no solo para la directa, así
+            // que se calcula fuera del condicional.
+            // Shadow factor from ray-cast cache: 0=shaded, 0.3=glazing, 1=clear
+            const sf = _shadowCache ? (_shadowCache.get(s.id)?.[hr] ?? 1) : 1;
             if(cosTheta > 0){
-              // Shadow factor from ray-cast cache: 0=shaded, 0.3=glazing, 1=clear
-              const sf = _shadowCache
-                ? (_shadowCache.get(s.id)?.[hr] ?? 1)
-                : 1;
               I_dir = DNI * cosTheta * sf;
             }
             // ── B. Diffuse sky (isotropic) ───────────────────────────────
-            I_dif = DHI * sg.skyVF;
+            // Isótropo (Liu–Jordan): radiancia uniforme en toda la bóveda.
+            // Perez: tres componentes, cada una con su propia obstrucción.
+            I_dif = _ph
+              ? perezDifusa(DHI, _ph, sg.normal.y, cosTheta, sg.skyVF, sf)
+              : DHI * sg.skyVF;
             // ── C. Ground-reflected (albedo) ─────────────────────────────
             I_ref = GHI * rho * sg.gndVF;
           }
@@ -27438,6 +27583,7 @@ function actualizarRadiacion(){
   if(el('rStatTot')) el('rStatTot').textContent = avgExp.toFixed(0);
   if(el('rStatMeta')) el('rStatMeta').textContent =
     `${pLbl} · Máx ${maxV.toFixed(P.dias>31?0:2)} kWh/m² · ρ=${rho} · ` +
+    `cielo ${_radModeloCielo} · ` +
     `${_base.length} sup. exteriores de ${extSurfs.length}` +
     (_nOcultas > 0 ? ` (${_nOcultas} fuera de la media: pisos e interiores)` : '') +
     ' · media ponderada por área' +
@@ -27566,6 +27712,10 @@ function actualizarRadiacion(){
 // ── Legend bar ────────────────────────────────────────────────────────────
 // v12.2 — Escala activa del falso color, para reconstruirla en el informe.
 let _radEscala = null;
+// v12.3 — Modelo de cielo con el que se calcularon los resultados vigentes.
+// Lo fija calcularRadiacion() y lo declara el encabezado del informe, para
+// que una lámina impresa diga siempre con qué modelo se obtuvo.
+let _radModeloCielo = 'isótropo (Liu–Jordan)';
 
 // Paradas de color de la escala Ecotect, en un único sitio para que el
 // panel y el informe no puedan desincronizarse.
@@ -28009,7 +28159,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.2</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.3</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -28061,6 +28211,14 @@ function mostrarAcercaDeNuevo(){
           sobre una biblioteca de materiales editable.</li>
         <li style="margin-bottom:7px">Geometría solar: declinación, ecuación del tiempo y corrección de longitud;
           diagrama solar, máscaras de sombra y planos de corte.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Dos modelos de cielo difuso</strong>,
+          seleccionables en el análisis de radiación: el isótropo de
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Liu–Jordan</span> (radiancia uniforme en toda la bóveda) y el anisótropo de
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Perez et al. (1990)</span>, que reparte la difusa en fondo isótropo, aureola
+          circunsolar y brillo de horizonte según la claridad ε y el brillo Δ del cielo de cada hora,
+          leídos del propio EPW. Poder comparar los dos sobre el mismo edificio es, en un curso, más
+          instructivo que tener solo el bueno. El modelo empleado queda declarado en el encabezado del
+          informe.</li>
         <li style="margin-bottom:7px">Radiación solar incidente horaria sobre las <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">8760 h</span> del EPW,
           con sombreamiento por trazado de rayos acelerado con <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">BVH</span> y muestreo
           multipunto por superficie. Resultados en <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">anual · mensual · un día · rango de fechas</span>.</li>
@@ -28080,6 +28238,33 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Novedades de v12.3</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Cielo anisótropo de Perez</strong>
+          (Solar Energy 44(5), 1990), como casilla junto a «Vista al cielo». La difusa deja de repartirse
+          por igual sobre la bóveda y se descompone en
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">(1−F1)·(1+cos β)/2 + F1·a/b + F2·sin β</span>, con F1 y F2 interpolados de una
+          tabla de 48 coeficientes según la claridad del cielo de cada hora. Esos coeficientes dependen
+          solo de la hora, no de la superficie, así que se calculan una vez por hora: el sobrecoste es
+          despreciable.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Se corrige una afirmación equivocada de
+          esta misma ventana.</strong> Hasta v12.2 se leía aquí que el cielo isótropo «con cielo despejado
+          subestima la fachada orientada al sol, típicamente entre un 5 y un 20 por ciento». Eso vale en
+          latitudes medias, donde la fachada ecuatorial ve la región circunsolar casi de frente buena parte
+          del año. Medido con un EPW de Vijes (3,7° N) ocurre lo contrario: el sol está alto, la aureola
+          circunsolar cae sobre la cubierta y las verticales la reciben de refilón, de modo que el isótropo
+          <b>sobreestima</b> las verticales en torno a un <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">6–8 por ciento</span> anual. La
+          horizontal no cambia en absoluto, porque el modelo está anclado a la difusa medida en ese plano.</li>
+        <li style="margin-bottom:7px">El efecto grande no está en el año sino en la <strong style="color:var(--text)">hora
+          punta</strong>: en mañanas y tardes despejadas, con el sol bajo y encarado, las fachadas este y oeste
+          reciben hasta <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">+134 W/m²</span> de difusa más que con el modelo isótropo. Eso apenas
+          mueve la energía anual, pero sí el pico, que es sobre lo que dimensiona el módulo HVAC.</li>
+        <li style="margin-bottom:7px">El modelo <strong style="color:var(--text)">se autocomprueba antes de
+          usarse</strong>: sobre plano horizontal debe devolver la difusa horizontal medida, exactamente. Si no
+          supera esa prueba, BioSim lo dice y calcula con el cielo isótropo en vez de seguir con un modelo
+          mal copiado.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.2</div>
@@ -28222,9 +28407,21 @@ function mostrarAcercaDeNuevo(){
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Limitaciones conocidas</div>
       <ul style="padding-left:20px;margin:8px 0">
-        <li style="margin-bottom:7px"><strong style="color:var(--text)">Cielo difuso isótropo</strong> (Liu–Jordan). No incorpora
-          las componentes circunsolar ni de brillo de horizonte del modelo de Perez, de modo que con cielo
-          despejado subestima la fachada orientada al sol, típicamente entre un 5 % y un 20 %.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El cielo de Perez solo rige el análisis
+          de radiación incidente.</strong> El <strong style="color:var(--text)">balance térmico</strong> sigue usando la difusa
+          simplificada del método de las admitancias (CIBSE Guide A §5.2), que no aplica factor de
+          inclinación: toma la difusa horizontal y la pondera con el factor solar de la superficie. Son
+          dos tratamientos distintos conviviendo, y conviene saberlo al comparar el mapa de radiación
+          con las temperaturas. Por defecto el análisis usa el cielo isótropo, de modo que ambos
+          coinciden en el punto de partida.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El reparto de la obstrucción entre las tres
+          componentes de Perez es aproximado.</strong> Al fondo isótropo le corresponde el factor de vista al
+          cielo medido, y a la aureola circunsolar el factor de sombra de esa hora, que es exacto: lo que
+          tapa el sol tapa su aureola. El brillo de horizonte, en cambio, se concentra en la banda baja de
+          la bóveda —justo la que ocultan los edificios vecinos—, y ponderarlo con el factor de vista al
+          cielo general lo sobreestima algo en entorno urbano denso. Resolverlo exige integrar la
+          radiancia parche a parche sobre los 145 de Tregenza: es viable, porque el cálculo de obstrucción
+          ya trabaja así, pero multiplica el coste por el número de superficies.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Factor de vista al cielo por obstrucción.</strong>
           La difusa y la reflejada ya no suponen el hemisferio despejado: se mide con 145 parches de
           Tregenza cuánto cielo ve realmente cada superficie, con muestreo adaptativo que asigna más
@@ -28315,7 +28512,7 @@ function mostrarAcercaDeNuevo(){
     </div>
 
     <div style="margin-top:20px;text-align:center;font-size:.62rem;color:var(--text3);font-family:var(--font-mono);line-height:1.6">
-      Métodos: CIBSE Admittance · ASHRAE 55 · ISO 6946 · ISO 13370 · Liu–Jordan<br>
+      Métodos: CIBSE Admittance · ASHRAE 55 · ISO 6946 · ISO 13370 · Liu–Jordan · Perez 1990<br>
       Para detalles técnicos completos: <em>Ayuda → Manual técnico completo</em>
     </div>
   </div>
@@ -28537,7 +28734,11 @@ U_iso = (2·λ/π·B_pe + d_te) · ln(π·B_pe/d_te + 1)       si d_te < B_pe
       El cálculo de irradiancia sobre cada superficie usa el <strong>modelo de tres componentes ASHRAE HOF
       (Perez-HDKR simplificado)</strong>:
       ${CODEBLK(`I_dir = DNI · cos θ · f_sombra            [directa proyectada con sombras]
-I_dif = DHI · (1 + cos β) / 2              [difusa isotrópica - factor cielo]
+I_dif = DHI · (1 + cos β) / 2              [difusa isótropa Liu-Jordan]
+I_dif = DHI · [(1-F1)·(1+cos β)/2
+             + F1·a/b + F2·sin β]          [difusa anisótropa Perez 1990, opcional]
+        a = max(0, cos θ) · b = max(cos 85°, cos θz)
+        F1, F2 de la tabla de 48 coeficientes según la claridad ε del cielo
 I_ref = GHI · ρ_albedo · (1 − cos β) / 2   [reflejada del suelo - factor suelo]
 I_total = I_dir + I_dif + I_ref`)}
       donde <strong>θ</strong> es el ángulo de incidencia entre el rayo solar y la normal de la superficie,
