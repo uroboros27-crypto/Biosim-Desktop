@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.3</title>
+<title>BioSim v12.4</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.3</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.4</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5602,7 +5602,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.3 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.4 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -18262,8 +18262,10 @@ function reclasificarInteriores(silencioso){
 //                 + F1·a/b               ← aureola circunsolar
 //                 + F2·sin β ]           ← brillo de horizonte
 //
-// con a = max(0, cos θ), b = max(cos 85°, cos θz), y F1, F2 interpolados
-// de una tabla de 48 coeficientes en ocho intervalos de ε.
+// con a = max(0, cos θ) y b = max(cos 85°, cos θz). F1 y F2 NO se
+// interpolan: se toma íntegra la fila de la tabla cuyo intervalo de ε
+// contiene a la hora. El reparto es por tramos, con ocho escalones, y así
+// está publicado; es también lo que hace EnergyPlus.
 //
 // Propiedad que sirve de prueba de contraste: sobre superficie HORIZONTAL
 // (β = 0) la expresión se reduce a DHI exactamente, porque el modelo está
@@ -18339,19 +18341,44 @@ function perezDifusa(DHI, ph, cosB, cosInc, vfCielo, sf){
   return Math.max(0, DHI * (iso + circ + hor));
 }
 
-// Prueba de contraste: sobre plano horizontal el modelo debe devolver la
-// difusa horizontal medida, exactamente. Si esto falla, la tabla de
-// coeficientes o la formulación están mal copiadas.
-function _perezAutoPrueba(){
-  const casos = [[900,90,45,172],[0,300,45,15],[600,250,70,300],[950,60,20,200]];
-  let peor = 0;
-  casos.forEach(([dni,dhi,altDeg,doy])=>{
+// ── Prueba de contraste ───────────────────────────────────────────────
+// Sobre plano horizontal el modelo debe devolver la difusa horizontal
+// medida, exactamente: con β = 0 queda DHI·[(1−F1) + F1·a/b], y para una
+// superficie horizontal θ = θz, de modo que a/b = 1 y los dos términos
+// suman 1. Si esto falla, la tabla de coeficientes o la formulación están
+// mal copiadas.
+//
+// PERO esa identidad solo se cumple por encima de 5° de altura solar. Por
+// debajo, el tope b = max(cos 85°, cos θz) del modelo publicado impide que
+// el denominador se desplome con el sol rasante, y al hacerlo rompe la
+// igualdad: a/b < 1 y la horizontal recibe algo menos que DHI. No es un
+// fallo de copia sino una propiedad del modelo de Perez, así que no se
+// corrige —apartarse de un modelo publicado sin validarlo es peor que su
+// sesgo conocido—, pero sí se mide y se declara.
+//
+// Medido con el EPW de Vijes: la franja de 0,5° a 5° reúne 163 horas y
+// 1,8 kWh/m² de los 819 anuales (0,22 %), y el déficit acumulado de la
+// identidad es de 0,01 kWh/m² — el 0,001 % del año, con una hora peor de
+// 1,0 W/m². Despreciable, pero ahora comprobado en vez de supuesto.
+const _PEREZ_ALT_EXACTA = 5;   // grados: por encima, identidad exacta
+
+function _perezAutoPrueba(detalle){
+  // Casos con el sol alto: la identidad debe cumplirse al bit.
+  const altos = [[900,90,45,172],[0,300,45,15],[600,250,70,300],[950,60,20,200],
+                 [700,200,6,80],[400,180,85,250]];
+  // Casos con el sol rasante, dentro del rango que BioSim llega a calcular
+  // (el bucle descarta por debajo de 0,5°): aquí solo se mide la desviación.
+  const bajos = [[200,60,0.6,172],[300,80,2,15],[150,50,4,300],[500,40,4.9,200]];
+  const medir = ([dni,dhi,altDeg,doy])=>{
     const thz = (90-altDeg)*Math.PI/180;
     const ph  = perezHora(dni,dhi,thz,doy);
-    const v   = perezDifusa(dhi, ph, 1, Math.cos(thz), 1, 1);  // β=0 → vf=1
-    peor = Math.max(peor, Math.abs(v - dhi));
-  });
-  return peor;
+    // β = 0 → cosB = 1 y factor de vista al cielo despejado = 1
+    return Math.abs(perezDifusa(dhi, ph, 1, Math.cos(thz), 1, 1) - dhi);
+  };
+  let peorAlto = 0, peorBajo = 0;
+  altos.forEach(c => { peorAlto = Math.max(peorAlto, medir(c)); });
+  bajos.forEach(c => { peorBajo = Math.max(peorBajo, medir(c)); });
+  return detalle ? {peorAlto, peorBajo} : peorAlto;
 }
 
 // ── Sun unit vector from solar angles ────────────────────────────
@@ -26565,7 +26592,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.3
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.4
   </div>
 </div>
 <script>
@@ -27012,11 +27039,19 @@ async function calcularRadiacion(){
   // no la supera, la tabla de coeficientes o la formulación están mal y es
   // preferible calcular con el isótropo que con un modelo roto.
   const _perezPedido = document.getElementById('radPerez')?.checked === true;
-  const _perezErr    = _perezPedido ? _perezAutoPrueba() : 0;
-  const _perezOK     = _perezPedido && _perezErr < 1e-6;
+  const _perezChk    = _perezPedido ? _perezAutoPrueba(true) : {peorAlto:0, peorBajo:0};
+  const _perezOK     = _perezPedido && _perezChk.peorAlto < 1e-6;
   if(_perezPedido && !_perezOK){
-    log(`⚠ El modelo de Perez no supera su prueba de contraste (error ${_perezErr.toFixed(4)} W/m² `+
-        'sobre plano horizontal). Se calcula con cielo isótropo.', 'err');
+    log(`⚠ El modelo de Perez no supera su prueba de contraste (error ${_perezChk.peorAlto.toFixed(4)} W/m² `+
+        'sobre plano horizontal con el sol alto). Se calcula con cielo isótropo.', 'err');
+  } else if(_perezOK){
+    log(`☀ Cielo anisótropo de Perez (1990). Prueba de contraste superada: sobre plano horizontal ` +
+        `devuelve la difusa medida con error ${_perezChk.peorAlto.toExponential(1)} W/m², ` +
+        `exacto por encima de ${_PEREZ_ALT_EXACTA}° de altura solar.`, 'ok');
+    log(`   ↳ Con el sol más bajo, el tope del modelo publicado en cos 85° rompe esa identidad y la ` +
+        `horizontal queda algo por debajo de la difusa medida (hasta ${_perezChk.peorBajo.toFixed(0)} W/m² ` +
+        'en los casos de prueba, que son más exigentes que un clima real). Esa franja reúne del orden ' +
+        'del 0,2 % de la difusa anual, así que no mueve los resultados.', 'info');
   }
   _radModeloCielo = _perezOK ? 'Perez anisótropo' : 'isótropo (Liu–Jordan)';
   if(usarSVF && (_svfCacheDirty || !_svfCache)){
@@ -28159,7 +28194,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.3</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.4</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -28240,13 +28275,15 @@ function mostrarAcercaDeNuevo(){
           y por etiqueta, y plano de sección arrastrable.</li>
       </ul>
 
-      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Novedades de v12.3</div>
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Novedades de v12.3 · afinado en v12.4</div>
       <ul style="padding-left:20px;margin:8px 0">
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Cielo anisótropo de Perez</strong>
           (Solar Energy 44(5), 1990), como casilla junto a «Vista al cielo». La difusa deja de repartirse
           por igual sobre la bóveda y se descompone en
-          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">(1−F1)·(1+cos β)/2 + F1·a/b + F2·sin β</span>, con F1 y F2 interpolados de una
-          tabla de 48 coeficientes según la claridad del cielo de cada hora. Esos coeficientes dependen
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">(1−F1)·(1+cos β)/2 + F1·a/b + F2·sin β</span>, con F1 y F2 tomados de una
+          tabla de 48 coeficientes: se escoge la fila cuyo intervalo de claridad contiene a esa hora,
+          sin interpolar entre filas. El reparto es por tramos, con ocho escalones, tal como está
+          publicado y como lo resuelve EnergyPlus. Esos coeficientes dependen
           solo de la hora, no de la superficie, así que se calculan una vez por hora: el sobrecoste es
           despreciable.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Se corrige una afirmación equivocada de
@@ -28259,12 +28296,24 @@ function mostrarAcercaDeNuevo(){
           horizontal no cambia en absoluto, porque el modelo está anclado a la difusa medida en ese plano.</li>
         <li style="margin-bottom:7px">El efecto grande no está en el año sino en la <strong style="color:var(--text)">hora
           punta</strong>: en mañanas y tardes despejadas, con el sol bajo y encarado, las fachadas este y oeste
-          reciben hasta <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">+134 W/m²</span> de difusa más que con el modelo isótropo. Eso apenas
-          mueve la energía anual, pero sí el pico, que es sobre lo que dimensiona el módulo HVAC.</li>
+          reciben hasta <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">+134 W/m²</span> de difusa más que con el modelo isótropo. Apenas
+          mueve la energía anual, pero es justo el tipo de carga que decide un pico de refrigeración.
+          <b>Conviene no sacar de ahí una conclusión que el programa todavía no sostiene:</b> esa cifra
+          <b>no llega</b> al dimensionamiento. El módulo HVAC se alimenta del balance térmico, que sigue
+          con la difusa simplificada del CIBSE y nunca lee los resultados del análisis de radiación. Hoy
+          el dato es <strong style="color:var(--text)">diagnóstico</strong> —sirve para ver en qué fachadas y a qué horas el
+          cielo isótropo se queda corto— y no una entrada del cálculo de potencia. Que llegue exige
+          unificar el tratamiento solar de los dos motores.</li>
         <li style="margin-bottom:7px">El modelo <strong style="color:var(--text)">se autocomprueba antes de
           usarse</strong>: sobre plano horizontal debe devolver la difusa horizontal medida, exactamente. Si no
           supera esa prueba, BioSim lo dice y calcula con el cielo isótropo en vez de seguir con un modelo
-          mal copiado.</li>
+          mal copiado. Esa identidad, eso sí, <b>solo rige por encima de 5° de altura solar</b>: por debajo,
+          el tope del modelo publicado en <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">cos 85°</span> —que evita que el denominador se
+          desplome con el sol rasante— la rompe, y la horizontal queda algo por debajo de la difusa medida.
+          No se corrige, porque apartarse de un modelo publicado sin validarlo es peor que su sesgo
+          conocido, pero la prueba mide ambos rangos por separado y lo declara. Acotado con el EPW de
+          Vijes: la franja de 0,5° a 5° son 163 horas y 1,8 de los 819 kWh/m² anuales, y el déficit
+          acumulado es de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">0,01 kWh/m²</span> — el 0,001 % del año.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.2</div>
@@ -28416,12 +28465,15 @@ function mostrarAcercaDeNuevo(){
           coinciden en el punto de partida.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">El reparto de la obstrucción entre las tres
           componentes de Perez es aproximado.</strong> Al fondo isótropo le corresponde el factor de vista al
-          cielo medido, y a la aureola circunsolar el factor de sombra de esa hora, que es exacto: lo que
-          tapa el sol tapa su aureola. El brillo de horizonte, en cambio, se concentra en la banda baja de
-          la bóveda —justo la que ocultan los edificios vecinos—, y ponderarlo con el factor de vista al
-          cielo general lo sobreestima algo en entorno urbano denso. Resolverlo exige integrar la
-          radiancia parche a parche sobre los 145 de Tregenza: es viable, porque el cálculo de obstrucción
-          ya trabaja así, pero multiplica el coste por el número de superficies.</li>
+          cielo medido. A la aureola circunsolar se le aplica el factor de sombra de esa hora, que es la
+          mejor señal disponible pero <b>no es exacta</b>: ese factor se traza contra el disco solar, de
+          medio grado escaso, mientras que la aureola de Perez abarca unos 25° de semiángulo. Un alero
+          puede tapar el disco dejando a la vista buena parte de la aureola, y al revés. El brillo de
+          horizonte se concentra en la banda baja de la bóveda —justo la que ocultan los edificios
+          vecinos—, y ponderarlo con el factor de vista al cielo general lo sobreestima algo en entorno
+          urbano denso. Las dos cosas se resuelven igual: integrando la radiancia parche a parche sobre
+          los 145 de Tregenza. Es viable, porque el cálculo de obstrucción ya trabaja así, pero multiplica
+          el coste por el número de superficies.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Factor de vista al cielo por obstrucción.</strong>
           La difusa y la reflejada ya no suponen el hemisferio despejado: se mide con 145 parches de
           Tregenza cuánto cielo ve realmente cada superficie, con muestreo adaptativo que asigna más
