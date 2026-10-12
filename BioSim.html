@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v11.7</title>
+<title>BioSim v12.0</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.7</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.0</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -4158,6 +4158,7 @@ canvas#cv{display:block;}
       <a onclick="colorMat()">🧱 Colorear por Material</a>
       <hr>
       <a onclick="dividirSuperficieSeleccion()" title="Separa en superficies independientes los paños de una superficie que quedaron fundidos al importar. Útil cuando dos faldones de cubierta o dos paños de muro separados por una línea se seleccionan juntos.">✂ Dividir superficie seleccionada…</a>
+      <a onclick="reclasificarInteriores(false)" title="Marca como interiores las superficies que no ven el exterior desde ningún ángulo: tabiques que el importador dejó como envolvente. Afecta al balance térmico, al UA del módulo HVAC y a las estadísticas de radiación.">🧭 Reclasificar superficies interiores</a>
       <a onclick="dividirCoplanaresSeleccion()" title="Recupera ventanas y puertas de una fachada que llegó como una sola superficie. Corta por las aristas interiores que son horizontales o verticales dentro del plano de la cara: dinteles, antepechos y jambas. Para archivos sin aristas «l», grupos ni materiales distintos.">⊞ Dividir caras coplanares (vanos)</a>
       <hr>
       <a onclick="toggleNormalsViz()" title="Muestra una flecha por superficie en la dirección de su normal. Verde = hacia fuera del modelo, naranja = hacia dentro.">➤ Ver normales</a>
@@ -5596,7 +5597,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.7 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.0 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -8690,6 +8691,11 @@ function registrar(geometrias, opts){
   _enforceUniqueSurfNames();
   // v6.0: aplicar visibility de zonas a meshes recién creados
   _syncZoneVisibility();
+
+  // v12.0: el importador marca TODO como exterior porque el archivo no
+  // distingue envolvente de tabiques. Aquí se corrige por geometría, antes
+  // de que ese dato equivocado llegue al balance térmico o al UA del HVAC.
+  try{ reclasificarInteriores(true); }catch(e){ /* modelo degenerado */ }
 }
 
 function areaLocal(geo){
@@ -8930,7 +8936,7 @@ function descomponerPorBordes(name, geo, hardEdgeDeg=30, hardEdges=null, op=null
   }
 
   // ── 6. Construir una BufferGeometry por grupo ─────────────────────
-  return _buildGeoGroups(name, pos, triNormals, groups);
+  return _buildGeoGroups(name, pos, triNormals, groups, (op && op.up) || 'y');
 }
 
 // Fallback para mallas muy grandes: agrupación solo por normal (sin conectividad)
@@ -8966,9 +8972,31 @@ function descomponerPorBordesSimple(name, src, hardEdgeDeg){
 // v11.6: cuántos grupos sin área se descartaron (diagnóstico de archivo).
 let _geoGruposNulos = 0;
 
-function _buildGeoGroups(name, pos, triNormals, groups){
+// v11.8 — `up` es el eje vertical del ARCHIVO, no el del mundo.
+//
+// El sufijo de orientación (_E, _O, _N, _S, _Techo, _Piso) se asigna aquí,
+// durante la descomposición, que trabaja sobre la geometría TAL COMO VIENE
+// del archivo: la conversión de ejes la aplica registrar() después. Con un
+// archivo Z-up y la tabla de ejes Y-up, cada cara recibía el rótulo de otra:
+// la cubierta se llamaba «_S», el piso «_N», la fachada norte «_Techo» y la
+// sur «_Piso». Los ejes X no se tocan, así que _E y _O sí salían bien, y por
+// eso el desajuste pasaba desapercibido.
+//
+// No es solo cosmético: calcularRadiacion() decidía «esto es un piso» por el
+// NOMBRE, de modo que la fachada bautizada «Mesh_Piso» —la sur— perdía su
+// difusa y su reflejada.
+function _buildGeoGroups(name, pos, triNormals, groups, up){
   const HINTS=['E','O','N','S','Techo','Piso'];
-  const AXES=[
+  // En Y-up (SketchUp, glTF): norte = −Z, cenit = +Y.
+  // En Z-up (CAD): norte = +Y, cenit = +Z — porque el giro −90° en X que
+  // aplica registrar() lleva el +Y del archivo al −Z del mundo.
+  const AXES = (up === 'z')
+  ? [
+    new THREE.Vector3(1,0,0),new THREE.Vector3(-1,0,0),
+    new THREE.Vector3(0,1,0),new THREE.Vector3(0,-1,0),
+    new THREE.Vector3(0,0,1),new THREE.Vector3(0,0,-1)
+  ]
+  : [
     new THREE.Vector3(1,0,0),new THREE.Vector3(-1,0,0),
     new THREE.Vector3(0,0,-1),new THREE.Vector3(0,0,1),
     new THREE.Vector3(0,1,0),new THREE.Vector3(0,-1,0)
@@ -12661,7 +12689,7 @@ function setSurfPartition(id, kind, neighZid){
   if(!s) return;
   if(isSurfaceLocked(s)){ log(`🔒 "${s.name}" está en zona bloqueada — tipo no modificado.`,'warn'); showSurfProps(s); return; }
   if(kind==='exterior'){
-    s.exterior = true;
+    s.exterior = true; s._extManual = true; s._extAuto = false;
     s.partition = null;
     s.neighborZoneId = null;
   } else if(kind==='interior'){
@@ -18071,6 +18099,140 @@ function invalidateShadowCache(){
   if(typeof _refreshViewMode === 'function') _refreshViewMode();
 }
 
+// v11.9 — ¿Está esta superficie realmente expuesta a la intemperie?
+//
+// `s.exterior` NO lo dice: registrar() lo pone en true en TODAS las
+// superficies importadas, particiones interiores y pisos incluidos, y
+// nadie lo corrige salvo que el usuario entre una por una. Lo que sí lo
+// dice es el factor de vista al cielo, que el motor ya mide por trazado
+// de rayos: una cara encerrada dentro del volumen no ve nada de cielo.
+//
+// Se devuelve `null` cuando aún no hay medida, para que quien pregunte
+// pueda distinguir «no expuesta» de «todavía no lo sé».
+function expuestaAlCielo(s){
+  if(!s) return null;
+  if(typeof _svfCache === 'undefined' || !_svfCache) return null;
+  const v = _svfCache.get(s.id);
+  if(!v) return null;
+  return v.skyFrac > 0.001;
+}
+
+// Encerrada: ni cielo ni terreno a la vista. Es lo que distingue una
+// partición interior de un piso, que no ve cielo pero sí ve el terreno.
+function encerradaEnVolumen(s){
+  if(!s) return null;
+  if(typeof _svfCache === 'undefined' || !_svfCache) return null;
+  const v = _svfCache.get(s.id);
+  if(!v) return null;
+  return v.skyFrac <= 0.001 && v.gndFrac <= 0.001;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// 🧭  RECLASIFICACIÓN DE SUPERFICIES INTERIORES (v12.0)
+// ═══════════════════════════════════════════════════════════════════════
+// registrar() pone `exterior = true` en TODAS las superficies importadas,
+// porque al leer un OBJ no hay forma de saber cuáles son envolvente y
+// cuáles tabiques. Nadie lo corrige salvo que el usuario entre superficie
+// por superficie, y el indicador no se ve en el visor: queda mal en
+// silencio.
+//
+// Y no es un detalle del informe. `s.exterior` gobierna:
+//   · la rama exterior del balance horario — conducción contra la
+//     temperatura sol-aire en vez de contra la zona vecina,
+//   · el UA de la envolvente que usa el módulo HVAC,
+//   · qué superficies entran en las estadísticas de radiación.
+//
+// Medido sobre un modelo de cuatro zonas con seis tabiques (33,7 m²):
+// UA 141,8 → 123,2 W/K al clasificarlos bien, un 13 % de sobreestimación
+// de la transmitancia global, y la oscilación interior diaria crecía
+// 0,9 K al dejar de estar amortiguada contra el aire exterior.
+//
+// La prueba es geométrica y no depende de cómo se llame la superficie:
+// se lanzan rayos desde su centroide por todo el hemisferio que mira su
+// normal. Si NINGUNO escapa del modelo, la cara está encerrada dentro del
+// volumen y no puede ser envolvente.
+
+// 21 direcciones repartidas por el hemisferio: más finas que las 8 de
+// _PROBE_DIRS, porque aquí un solo rayo que escape decide el resultado y
+// conviene no perderse un hueco estrecho.
+const _ENC_DIRS = (() => {
+  const d = [];
+  [[8,0],[8,60],[8,120],[8,180],[8,240],[8,300],
+   [30,30],[30,90],[30,150],[30,210],[30,270],[30,330],
+   [55,0],[55,72],[55,144],[55,216],[55,288],
+   [75,45],[75,165],[75,285],[89,0]].forEach(([altD,azD])=>{
+    const a=altD*Math.PI/180, z=azD*Math.PI/180;
+    d.push(new THREE.Vector3(Math.sin(z)*Math.cos(a), Math.sin(a), -Math.cos(z)*Math.cos(a)).normalize());
+  });
+  return d;
+})();
+
+// ¿Está la superficie encerrada dentro del volumen del modelo?
+// Las direcciones se construyen en el marco de la superficie, de modo que
+// la prueba vale igual para un muro, una cubierta o un piso.
+function _caraEncerrada(s, bvh){
+  const cn = surfaceCentroidNormal(s);
+  if(!cn) return false;
+  const n = cn.normal.clone().normalize();
+  // Marco local: n como «cenit», dos tangentes cualesquiera.
+  const t1 = Math.abs(n.y) > 0.9 ? new THREE.Vector3(1,0,0) : new THREE.Vector3(0,1,0);
+  const u = new THREE.Vector3().crossVectors(t1, n).normalize();
+  const v = new THREE.Vector3().crossVectors(n, u).normalize();
+  const o = cn.centroid.clone().addScaledVector(n, 0.05);
+  const dir = new THREE.Vector3();
+  for(const d of _ENC_DIRS){
+    // d viene expresada con Y = «hacia fuera»; se rota al marco de la cara.
+    dir.set(0,0,0).addScaledVector(u, d.x).addScaledVector(n, d.y).addScaledVector(v, d.z).normalize();
+    // Basta con que UN rayo escape para que la cara sea envolvente.
+    if(_bvhTransmittance(bvh, o, dir, 0.05, 1000, s.id) > 0.001) return false;
+  }
+  return true;
+}
+
+// Reclasifica como interiores las caras que no pueden ver el exterior.
+// `silencioso` evita el diálogo y los avisos largos (uso tras importar).
+function reclasificarInteriores(silencioso){
+  const cand = surfaces.filter(s => s.mesh && s.mesh.isMesh && s.exterior !== false);
+  if(cand.length === 0){ if(!silencioso) log('No hay superficies marcadas como exteriores.','warn'); return 0; }
+
+  const casters = surfaces.filter(s => s.mesh && s.mesh.isMesh);
+  const bvh = _buildShadowBVH(casters);
+  if(!bvh){ if(!silencioso) log('No se pudo construir el acelerador de rayos.','err'); return 0; }
+
+  const cambiadas = [];
+  cand.forEach(s => {
+    // Nunca se toca una decisión explícita del usuario.
+    if(s._extManual) return;
+    if(_caraEncerrada(s, bvh)){
+      s.exterior = false;
+      s._extAuto  = true;          // marca de reclasificación automática
+      cambiadas.push(s);
+    }
+  });
+
+  if(cambiadas.length){
+    invalidateShadowCache();
+    if(typeof invalidateSVFCache === 'function') invalidateSVFCache();
+    const area = cambiadas.reduce((a,s)=>a+s.area, 0);
+    log(`🧭 ${cambiadas.length} superficie(s) reclasificadas como INTERIORES ` +
+        `(${area.toFixed(1)} m²): no ven el exterior desde ningún ángulo. ` +
+        'Dejan de contar como envolvente en el balance térmico, en el UA del ' +
+        'módulo HVAC y en las estadísticas de radiación.', 'ok');
+    log('   ↳ Una cara con la NORMAL INVERTIDA da el mismo síntoma, porque sus ' +
+        'rayos salen hacia dentro del volumen. Si echas en falta algún paño de ' +
+        'fachada, revísalo con Selección → Normales sospechosas y vuelve a ' +
+        'marcarlo como exterior en sus propiedades.', 'warn');
+    if(!silencioso){
+      renderZoneTree(); updateStatus(); _refreshPropsPanel();
+    }
+  } else if(!silencioso){
+    log('Ninguna superficie quedó reclasificada: todas las marcadas como ' +
+        'exteriores ven el exterior desde algún ángulo.', 'ok');
+  }
+  return cambiadas.length;
+}
+
 // ── Sun unit vector from solar angles ────────────────────────────
 // Returns THREE.Vector3 pointing FROM scene origin TOWARD the sun
 // Coordinate system: X=East, Y=Up, Z=South (Three.js default)
@@ -18858,7 +19020,8 @@ function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rh
       const _esAdiab = sg ? sg.isAdiabatic : ((s.tag||autoTag(s))==='adiabática');
       if(_esAdiab){ _addAdmittance(s, p, zi, H, Q, bufIdx); return; }
       const isGlaz     = sg ? sg.isGlaz     : /ventana|window|vidrio|glass|cristal|glazing|acristal|claraboya|skylight|lucernario|tragaluz/.test(s.name.toLowerCase());
-      const isFloor    = sg ? sg.isFloor    : /piso|floor|suelo|ground/.test(s.name.toLowerCase());
+      // v11.8: el respaldo también por etiqueta, no por subcadena del nombre.
+      const isFloor    = sg ? sg.isFloor : _TAGS_PISO.includes(s.tag || autoTag(s));
       // v11.7: criterio único (ver esPisoEnTerreno). Antes aquí 'losa'
       // acoplaba al terreno y en los otros dos sitios no.
       const isFloorGround = esPisoEnTerreno(s);
@@ -26112,7 +26275,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.7
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.0
   </div>
 </div>
 <script>
@@ -26576,9 +26739,19 @@ async function calcularRadiacion(){
     // Floor: downward normal OR named floor/losa — BUT NOT claraboya (explicit override)
     // v5.4: 'piso' (terreno) y 'losa' (entrepiso) ambos son horizontal-hacia-abajo
     // — no reciben radiación solar exterior (skyVF=0, gndVF=0).
+    // v11.8 — Antes había aquí una tercera condición: que el NOMBRE de la
+    // superficie contuviera «piso», «floor», «suelo», «ground», «losa»,
+    // «entrepiso» o «slab», sin exigir límite de palabra. Cualquier
+    // superficie llamada «Mesh_Piso», «Pisos nivel 2» o «ground floor wall»
+    // quedaba clasificada como piso y salía con skyVF = gndVF = 0, es decir,
+    // sin difusa ni reflejada, por mucho que su etiqueta fuera «muro» y su
+    // factor de vista al cielo medido fuera 0,5.
+    //
+    // El nombre no es el dato: autoTag() ya aplica sus propias reglas por
+    // nombre, y esas sí exigen límite de palabra. Aquí basta la etiqueta
+    // resultante más la geometría.
     const isFloor  = !isSkylight && (
                        cosB < -0.3
-                    || /piso|floor|suelo|ground|losa|entrepiso|slab/.test(s.name.toLowerCase())
                     || tag === 'piso'
                     || tag === 'losa'
                      );
@@ -27044,20 +27217,56 @@ function actualizarRadiacion(){
   const sr = document.getElementById('radStatsRow');
   if(sr) sr.style.display = 'block';
 
-  const avgDir = extSurfs.reduce((a,s) => a + _radVal(_radResults.get(s.id),'dir',P), 0) / Math.max(extSurfs.length,1);
-  const avgDif = extSurfs.reduce((a,s) => a + _radVal(_radResults.get(s.id),'dif',P), 0) / Math.max(extSurfs.length,1);
-  const avgRef = extSurfs.reduce((a,s) => a + _radVal(_radResults.get(s.id),'ref',P), 0) / Math.max(extSurfs.length,1);
+  // ── v11.9 · Media POR ÁREA y solo sobre la envolvente expuesta ─────
+  // La media anterior era aritmética sobre superficies y abarcaba todo lo
+  // que entrara en el informe. Dos problemas:
+  //
+  //  · Mezclaba magnitudes. Un piso no muestra radiación incidente sino
+  //    solar transmitida por los vidrios repartida sobre su área, y una
+  //    partición interior muestra 0. Promediarlos con la irradiación de
+  //    una fachada no significa nada.
+  //  · Daba el mismo peso a un montante de 0,6 m² que a un muro de 25 m².
+  //    Como la separación de vanos multiplica el número de piezas
+  //    pequeñas, la media cambiaba según cómo estuviera troceado el
+  //    modelo, no según cuánto sol recibe.
+  //
+  // Ahora: media ponderada por área, restringida a las superficies que el
+  // trazado de rayos encuentra con cielo a la vista. Eso deja fuera tanto
+  // las particiones interiores (que muestran 0) como los pisos (que
+  // muestran solar transmitida por los vidrios, no irradiación incidente).
+  // v12.0: el criterio es el indicador EXTERIOR, que es el que el usuario
+  // ve y puede editar, y que desde esta versión el importador deja bien
+  // puesto. Se añade la comprobación por trazado de rayos como red de
+  // seguridad: si algo sigue marcado exterior pero no ve cielo —un tabique
+  // que el usuario forzó, una normal invertida— tampoco entra en la media,
+  // y la tabla lo señala con «Interior ⚠».
+  const _expuestas = extSurfs.filter(s => s.exterior && expuestaAlCielo(s) !== false);
+  const _base = _expuestas.length ? _expuestas : extSurfs;
+  const _areaTot = _base.reduce((a,s) => a + (s.area||0), 0) || 1;
+  const _wavg = (comp) => _base.reduce(
+      (a,s) => a + _radVal(_radResults.get(s.id), comp, P) * (s.area||0), 0) / _areaTot;
+  const avgDir = _wavg('dir');
+  const avgDif = _wavg('dif');
+  const avgRef = _wavg('ref');
+  const _nOcultas = extSurfs.length - _expuestas.length;
 
   const pLbl = P.label;
   // Media diaria: en periodos cortos la cifra acumulada dice poco por sí sola.
-  const avgPorDia = P.dias > 1 ? avgV / P.dias : avgV;
+  // avgV sigue siendo la media aritmética sobre TODO lo calculado, que es
+  // lo que usa la escala de falso color; para las cifras del encabezado se
+  // usa la ponderada por área sobre lo expuesto.
+  const avgExp = avgDir + avgDif + avgRef;
+  const avgPorDia = P.dias > 1 ? avgExp / P.dias : avgExp;
   const el = id => document.getElementById(id);
   if(el('rStatDir')) el('rStatDir').textContent = avgDir.toFixed(0);
   if(el('rStatDif')) el('rStatDif').textContent = avgDif.toFixed(0);
   if(el('rStatRef')) el('rStatRef').textContent = avgRef.toFixed(0);
-  if(el('rStatTot')) el('rStatTot').textContent = avgV.toFixed(0);
+  if(el('rStatTot')) el('rStatTot').textContent = avgExp.toFixed(0);
   if(el('rStatMeta')) el('rStatMeta').textContent =
-    `${pLbl} · Máx ${maxV.toFixed(P.dias>31?0:2)} kWh/m² · ρ=${rho} · ${extSurfs.length} sup.` +
+    `${pLbl} · Máx ${maxV.toFixed(P.dias>31?0:2)} kWh/m² · ρ=${rho} · ` +
+    `${_base.length} sup. exteriores de ${extSurfs.length}` +
+    (_nOcultas > 0 ? ` (${_nOcultas} fuera de la media: pisos e interiores)` : '') +
+    ' · media ponderada por área' +
     (P.dias > 1 ? ` · media diaria ${avgPorDia.toFixed(2)} kWh/m²·día` : '');
 
   // ── Surface table ────────────────────────────────────────────────────
@@ -27077,9 +27286,16 @@ function actualizarRadiacion(){
     const tagIco  = TAG_SVG[stag3] || TAG_ICON[stag3] || '▪';
     // v4.6: clasificación de partición para mostrar en columna del informe
     let partKind, partLbl, partTip, partColor;
-    if(s.exterior){
-      partKind = 'ext'; partLbl = 'Exterior'; partColor = '#ffaa44';
-      partTip = 'Superficie exterior expuesta a la intemperie (recibe radiación directa, difusa y reflejada)';
+    // v11.9: una superficie marcada «Exterior» que el trazado de rayos
+    // encuentra sin NADA de cielo ni de terreno a la vista es, de hecho,
+    // interior: una partición que nadie reclasificó. Se rotula por lo
+    // medido, no por la casilla, que viene en true de fábrica.
+    if(s.exterior && encerradaEnVolumen(s) === true){
+      partKind = 'int'; partLbl = 'Interior ⚠'; partColor = '#88aac8';
+      partTip = 'Marcada como Exterior, pero el trazado de rayos no le encuentra '
+              + 'cielo ni terreno a la vista: está encerrada dentro del volumen. '
+              + 'Casi siempre es una partición interior que quedó sin reclasificar, '
+              + 'o una cara con la normal invertida. No recibe radiación del exterior.';
     } else if(esPisoEnTerreno(s)){
       partKind = 'grd'; partLbl = 'Terreno'; partColor = '#a08858';
       partTip = 'Superficie en contacto con el terreno (radiación solar nula; recibe radiación transmitida por ventanas)';
@@ -27087,6 +27303,9 @@ function actualizarRadiacion(){
       partKind = 'shr'; partLbl = 'Compartida'; partColor = '#b88dff';
       const nbZone = zones.find(z => z.id === s.neighborZoneId);
       partTip = `Partición compartida entre dos zonas térmicas${nbZone ? ' (acoplada a "'+nbZone.name+'")' : ''}`;
+    } else if(s.exterior){
+      partKind = 'ext'; partLbl = 'Exterior'; partColor = '#ffaa44';
+      partTip = 'Superficie exterior expuesta a la intemperie (recibe radiación directa, difusa y reflejada)';
     } else {
       partKind = 'int'; partLbl = 'Interior'; partColor = '#88aac8';
       partTip = 'Partición interior dentro de la misma zona (recibe radiación transmitida por ventanas; sin radiación directa del exterior)';
@@ -27583,7 +27802,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.7</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.0</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -27654,6 +27873,75 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.0</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Los tabiques entraban en el modelo
+          como envolvente.</strong> Un OBJ no distingue fachada de tabique, así que el importador marcaba
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">exterior = true</span> en todas las superficies y nadie lo
+          corregía. Ese indicador gobierna la rama exterior del balance horario —conducción contra la
+          temperatura sol-aire en vez de contra la zona vecina—, el UA de la envolvente del módulo HVAC
+          y el alcance de las estadísticas de radiación. Medido en un modelo de cuatro zonas con seis
+          tabiques de 33,7 m²: <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">UA 141,8 → 123,2 W/K</span>, un 13 % de
+          sobreestimación de la transmitancia global, y la oscilación interior crecía 0,9 K al dejar de
+          estar amortiguada contra el aire exterior. Ahora, al importar, BioSim lanza 21 rayos por el
+          hemisferio de cada cara: si ninguno escapa del modelo, la cara está encerrada y se marca como
+          interior. También está como comando en <em>Modelo → Reclasificar superficies interiores</em>.
+          Una decisión manual del usuario nunca se pisa.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El informe de radiación cuenta solo
+          la envolvente.</strong> Las estadísticas y la media se calculan ahora únicamente sobre las
+          superficies marcadas como exteriores. Los pisos y los tabiques siguen en la tabla con lo que
+          de verdad reciben —la solar transmitida por los acristalamientos y repartida en el interior,
+          señalada con ✳— pero fuera del promedio, porque es otra magnitud. El encabezado dice cuántas
+          entraron y cuántas quedaron fuera.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v11.9</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Toda superficie importada se marcaba
+          «Exterior».</strong> El importador pone
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">exterior = true</span> en todas, pisos y particiones
+          interiores incluidos, y nadie lo corrige salvo que el usuario entre una por una. En el
+          informe de radiación eso rotulaba como «Exterior» —con el texto de ayuda «recibe radiación
+          directa, difusa y reflejada»— caras encerradas dentro del volumen que no reciben nada. Ahora
+          manda lo medido: si el trazado de rayos no le encuentra cielo ni terreno a la vista, se
+          rotula <strong style="color:var(--text)">Interior ⚠</strong>, y un piso en contacto con el suelo se rotula
+          <strong style="color:var(--text)">Terreno</strong> aunque venga marcado como exterior.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">La media del informe mezclaba
+          magnitudes y dependía del troceado.</strong> Era la media aritmética por superficie de todo lo
+          calculado: irradiación incidente sobre fachadas, solar transmitida por los vidrios repartida
+          sobre el piso, y ceros de las particiones interiores, todo en el mismo promedio. Y daba el
+          mismo peso a un montante de 0,6 m² que a un muro de 25 m², de modo que la cifra cambiaba
+          según cómo estuviera subdividido el modelo. Ahora es una <strong style="color:var(--text)">media
+          ponderada por área</strong>, restringida a las superficies con cielo a la vista, y el
+          encabezado dice cuántas quedaron dentro y cuántas fuera. Medido sobre un caso real:
+          726 → <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">1 112 kWh/m²</span>, con 10 superficies de 34 apartadas
+          por no recibir radiación exterior.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v11.8</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Rótulos de orientación girados en
+          archivos Z-up.</strong> El sufijo <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">_N · _S · _E · _O · _Techo · _Piso</span>
+          se asigna durante la descomposición, que trabaja sobre la geometría tal como viene del
+          archivo, mientras que la conversión de ejes se aplica después. Con un archivo Z-up la
+          cubierta salía llamada <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">_S</span>, el piso
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">_N</span>, la fachada norte
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">_Techo</span> y la sur
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">_Piso</span>. Este y oeste sí salían bien —el giro no toca el
+          eje X—, y eso hacía el desajuste difícil de ver. Los informes quedaban ilegibles: comparar la
+          «fachada norte» con la «sur» era comparar el piso con la cubierta.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Difusa y reflejada anuladas por el
+          nombre de la superficie.</strong> El cálculo de radiación decidía si una superficie era un piso
+          buscando <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">piso · floor · suelo · ground · losa · entrepiso · slab</span>
+          dentro del nombre, sin exigir límite de palabra. Cualquier superficie llamada
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Mesh_Piso</span>, «Pisos nivel 2» o «ground floor wall» entraba
+          con factor de vista al cielo y al terreno igual a cero, o sea sin difusa ni reflejada, aunque
+          su etiqueta fuera muro y su factor medido fuera 0,5. Combinado con el fallo anterior, en todo
+          modelo Z-up la fachada sur perdía las dos componentes: medido sobre un caso real, pasaba de
+          387 a <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">988 kWh/m²</span>. Ahora manda la etiqueta, que es
+          donde las reglas por nombre sí exigen límite de palabra.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v11.7</div>
