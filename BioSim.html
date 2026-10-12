@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v11.6</title>
+<title>BioSim v11.7</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4086,7 +4086,10 @@ canvas#cv{display:block;}
 .modal-bg.h{display:none}
 .modal{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:18px;min-width:300px;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)}
 .modal h3{font-size:.88rem;font-weight:700;color:var(--accent);margin-bottom:12px}
-.mrow{margin-bottom:8px}.mlbl{font-size:.65rem;color:var(--text3);margin-bottom:3px;font-family:var(--font-mono)}
+.mrow{margin-bottom:8px}.msym{display:block;font-weight:400;font-size:.55rem;color:var(--text3);
+  font-family:var(--font-mono);letter-spacing:.01em;margin-top:1px;text-transform:none}
+.mlbl[title]{cursor:help}
+.mlbl{font-size:.65rem;color:var(--text3);margin-bottom:3px;font-family:var(--font-mono)}
 .mact{display:flex;gap:7px;justify-content:flex-end;margin-top:14px}
 
 /* Progress */
@@ -4126,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.6</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v11.7</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -5538,7 +5541,7 @@ canvas#cv{display:block;}
     <h3>Editar Material</h3>
     <div style="font-size:.65rem;color:var(--text3);font-family:var(--font-mono);margin-bottom:10px">ID: <b id="mMatId"></b></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div class="mrow" style="grid-column:1/3"><div class="mlbl">Nombre</div><input class="pinp" id="mMatName" style="width:100%"></div>
+      <div class="mrow" style="grid-column:1/3"><div class="mlbl">Nombre del material</div><input class="pinp" id="mMatName" style="width:100%"></div>
       <div class="mrow"><div class="mlbl">Categoría</div><select class="pinp psel" id="mMatCat" style="width:100%" onchange="toggleGlassFields(this.value)"></select></div>
       <div></div>
       <div class="mrow"><div class="mlbl">λ (W/mK)</div><input class="pinp" id="mMatLambda" type="number" step="0.01" style="width:100%"></div>
@@ -5547,17 +5550,18 @@ canvas#cv{display:block;}
       <div class="mrow" id="mRowSA"><div class="mlbl">Abs. solar α (0–1)</div><input class="pinp" id="mMatSA" type="number" step="0.01" min="0" max="1" style="width:100%"></div>
       <div class="mrow"><div class="mlbl">Emis. LW ε (0–1)</div><input class="pinp" id="mMatEM" type="number" step="0.01" min="0" max="1" style="width:100%"></div>
       <div class="mrow"><div class="mlbl">Opacidad (0–1)</div><input class="pinp" id="mMatOpacity" type="number" step="0.05" min="0" max="1" style="width:100%"></div>
-      <div class="mrow"><div class="mlbl">Color</div><input type="color" id="mMatColor" style="width:100%;height:30px;border-radius:4px;border:1px solid var(--border);cursor:pointer"></div>
+      <div class="mrow"><div class="mlbl">Color en el visor</div><input type="color" id="mMatColor" style="width:100%;height:30px;border-radius:4px;border:1px solid var(--border);cursor:pointer"></div>
       <!-- Campos exclusivos de Vidrio — ocultos para otros materiales -->
       <div id="mGlassFields" style="display:none;grid-column:1/3;border-top:1px solid var(--border);margin-top:4px;padding-top:8px">
         <div style="font-size:.62rem;font-weight:700;color:var(--accent);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em">Propiedades Ópticas del Acristalamiento</div>
+        <div style="font-size:.57rem;color:var(--text3);line-height:1.5;margin-bottom:7px">Pase el cursor sobre cada rótulo para ver qué significa, en qué norma se define y cómo lo usa el motor.</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div class="mrow">
-            <div class="mlbl" title="Solar Heat Gain Coefficient (g, SHGC). Fracción de la radiación solar TOTAL (UV+visible+IR cercano, 300–2500 nm) que entra como calor a través del vidrio. Norma: NFRC 200 / EN 410. Usado por el motor: Q_sol = SHGC · A · I_eff · dirt">SHGC — g  (0–1) ℹ</div>
+            <div class="mlbl" title="Factor solar / coeficiente de ganancia de calor solar (SHGC, g). Fracción de la radiación solar TOTAL (UV+visible+IR cercano, 300–2500 nm) que entra como calor a través del vidrio. Norma: NFRC 200 / EN 410. Usado por el motor: Q_sol = SHGC · A · I_eff · dirt">Factor solar<span class="msym">SHGC · g · 0–1</span></div>
             <input class="pinp" id="mMatSHGC" type="number" step="0.01" min="0" max="1" onchange="updateGlassLSG()" style="width:100%">
           </div>
           <div class="mrow">
-            <div class="mlbl" title="Visible Transmittance (τ_v, VT). Fracción de la luz VISIBLE (380–780 nm, lo que percibe el ojo humano) que atraviesa el vidrio. Norma: NFRC 200 / EN 410. Informativo: indica cuánta luz natural pasa al interior — útil para diseño de iluminación y confort visual. NO se usa en el balance térmico (eso lo hace SHGC).">VT — τ_v  (0–1) ℹ</div>
+            <div class="mlbl" title="Transmitancia luminosa / visible transmittance (τv, VT). Fracción de la luz VISIBLE (380–780 nm, lo que percibe el ojo humano) que atraviesa el vidrio. Norma: NFRC 200 / EN 410. Informativo: indica cuánta luz natural pasa al interior — útil para diseño de iluminación y confort visual. NO se usa en el balance térmico (eso lo hace SHGC).">Transmitancia luminosa<span class="msym">VT · τv · 0–1</span></div>
             <input class="pinp" id="mMatVT" type="number" step="0.01" min="0" max="1" onchange="updateGlassLSG()" style="width:100%">
           </div>
           <div class="mrow">
@@ -5592,7 +5596,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.6 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v11.7 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -5881,6 +5885,26 @@ const getMat=id=>MATS.find(m=>m.id===id)||MATS[0];
 // activando el modelo ISO 13370 de transferencia con terreno aunque la superficie
 // estuviera en un segundo nivel. Ahora autoTag devuelve 'losa' por defecto y el
 // usuario marca explícitamente 'piso' cuando aplica.
+// ¿Está esta superficie en el nivel más bajo del modelo? Se compara su
+// cota inferior con la del conjunto. El resultado se memoriza por
+// superficie y se invalida cuando cambia la geometría.
+let _nivelBajoModelo = null;
+function _invalidarNivelBajo(){ _nivelBajoModelo = null; }
+function _estaEnNivelBajo(s){
+  if(!s || !s.mesh || !s.mesh.geometry) return true;
+  if(_nivelBajoModelo === null){
+    let mn = Infinity;
+    surfaces.forEach(x=>{
+      if(!x.mesh || !x.mesh.geometry) return;
+      const bb = new THREE.Box3().setFromObject(x.mesh);
+      if(bb.min.y < mn) mn = bb.min.y;
+    });
+    _nivelBajoModelo = isFinite(mn) ? mn : 0;
+  }
+  const bb = new THREE.Box3().setFromObject(s.mesh);
+  return (bb.min.y - _nivelBajoModelo) < 0.60;
+}
+
 function autoTag(s){
   if(s.tag && s.tag !== 'auto') return s.tag;  // user override preserved (incl. 'adiabática')
   const lname  = (s.name||'').toLowerCase().trim();
@@ -5917,10 +5941,20 @@ function autoTag(s){
     if(cn){
       const ny=cn.normal.normalize().y;
       if(ny >  0.70) return 'cubierta';   // near-horizontal facing up → roof
-      // v5.4: horizontal-hacia-abajo → 'losa' por defecto (no 'piso'). El usuario
-      // decide explícitamente si una superficie está en contacto con terreno
-      // cambiando su etiqueta a 'piso'.
-      if(ny < -0.30) return 'losa';
+      // v11.7: horizontal-hacia-abajo → 'piso' si está en el nivel MÁS BAJO
+      // del modelo, 'losa' si está por encima.
+      //
+      // Hasta v11.6 toda horizontal hacia abajo se etiquetaba 'losa', y como
+      // 'losa' significa entrepiso, la solera de cualquier modelo importado
+      // entraba sin contacto con el terreno: el suelo de la planta baja se
+      // resolvía contra la temperatura sol-aire, con sol incluido. Nadie lo
+      // veía porque la etiqueta por sí sola no dice nada en pantalla.
+      //
+      // La cota decide: si la cara está a menos de 0,60 m del punto más bajo
+      // del modelo, es la que apoya en el terreno. El umbral deja pasar
+      // desniveles y rampas sin confundir una losa de entrepiso, que está a
+      // una altura de planta de distancia.
+      if(ny < -0.30) return _estaEnNivelBajo(s) ? 'piso' : 'losa';
     }
   }
   return 'muro';   // default: vertical surface → wall
@@ -10965,51 +10999,266 @@ function selZona(){
 }
 
 function calcVols(){
-  zones.forEach(z=>{ autoCalcZoneVolume(z.id); });
-  renderZoneTree(); log('Volúmenes recalculados.','ok');
+  const r = zones.map(z=>({z, r:autoCalcZoneVolume(z.id, true)}));
+  renderZoneTree();
+  const malos = r.filter(x=>x.r && (x.r.metodo!=='divergencia' || x.r.cierre<0.98));
+  const giroMixto = r.filter(x=>x.r && x.r.metodo==='divergencia (giro mixto)');
+  const interior  = r.filter(x=>x.r && x.r.diag && x.r.diag.noManifold>0.02);
+  log(`Volúmenes recalculados: ` + r.map(x=>`${x.z.name} ${x.z.volume} m³`).join(' · '),
+      malos.length ? 'warn' : 'ok');
+  malos.forEach(x=>{
+    log(x.r.metodo==='caja envolvente'
+      ? `   ⚠ "${x.z.name}": cierre no integrable, se usó la caja envolvente (cota superior).`
+      : x.r.metodo==='divergencia (giro mixto)'
+      ? `   ⚠ "${x.z.name}": caras con giro invertido; volumen por el método robusto.`
+      : `   ⚠ "${x.z.name}": cierre incompleto (${(x.r.cierre*100).toFixed(0)}% de aristas pareadas); volumen aproximado.`,
+      'warn');
+  });
+  interior.forEach(x=>{
+    log(`   ⚠ "${x.z.name}": contiene caras interiores (${(x.r.diag.noManifold*100).toFixed(0)}% ` +
+        'de aristas con más de dos caras); el volumen es orientativo.', 'warn');
+  });
+  if(giroMixto.length){
+    log('   ↳ El giro invertido también deja superficies sin sol y sin factor de ' +
+        'vista al cielo. Revísalo con Selección → Normales sospechosas.', 'warn');
+  }
 }
 
-// Auto-calculate zone volume from its surfaces using bounding-box method.
-// For fully-closed zones the divergence theorem gives exact volume;
-// for open/partial zones we fall back to a bbox heuristic.
-function autoCalcZoneVolume(zoneId){
-  const z = zones.find(x=>x.id===zoneId); if(!z) return;
-  const ss = surfaces.filter(s=>s.zoneId===zoneId && s.mesh && s.mesh.geometry);
-  if(ss.length===0){ z.volume=Math.max(1,z.volume||1); return; }
+// ═══════════════════════════════════════════════════════════════════════
+// 📐  VOLUMEN DE ZONA (v11.7 — reescrito)
+// ═══════════════════════════════════════════════════════════════════════
+// El volumen no es un dato decorativo: multiplica la conductancia de
+// infiltración y de ventilación (G = ρ·cp·ACH/3600·V), fija la capacidad
+// térmica del aire (C = ρ·cp·V) y, cuando la ventilación se da por
+// persona o por m², es el divisor que la convierte en renovaciones/hora.
+// Un volumen equivocado desplaza toda la temperatura interior.
+//
+// El método es el teorema de la divergencia: V = (1/6)·Σ v0·(v1×v2) sobre
+// los triángulos del cierre. Exacto, pero con tres condiciones que la
+// implementación anterior no garantizaba, y cada una fallaba en silencio:
+//
+//  1. El cierre debe estar COMPLETO. Una partición interzonal pertenece a
+//     una sola zona (zoneId); la zona del otro lado la veía como un hueco
+//     y perdía su parte. Medido: dos cuartos iguales de 72 m³ daban 72 y
+//     48 m³.
+//  2. Los triángulos deben tener orientación COHERENTE. Con una sola cara
+//     invertida —lo normal en geometría importada— la suma se cancela:
+//     medido, 24 m³ en vez de 72.
+//  3. Para un cierre abierto la fórmula NO es invariante a traslación, así
+//     que el resultado depende de dónde esté el modelo respecto al origen.
+//     Medido con un muro ausente: 48 m³ en el origen, 152 a 50 m, 1 952 a
+//     500 m y 3 999 952 m³ con coordenadas de proyecto. El respaldo
+//     «si V < 0,5 usa la caja» nunca saltaba, porque el error es por exceso.
+//
+// Correcciones: se incluyen las particiones que limitan la zona aunque las
+// posea la vecina; cada tetraedro se integra desde el CENTROIDE de la zona
+// y se orienta por su propia normal geométrica, lo que hace el resultado
+// invariante a traslación e inmune al sentido de giro del archivo; y se
+// mide si el cierre está realmente cerrado para avisar al usuario y para
+// acotar el resultado contra la caja envolvente.
 
-  // Method: signed volume via divergence theorem summed over all mesh triangles
-  // V = (1/6) * |Σ v0·(v1×v2)| — exact for closed manifold meshes
-  let signedVol = 0;
-  const _wa=new THREE.Vector3(), _wb=new THREE.Vector3(), _wc=new THREE.Vector3();
-  ss.forEach(s=>{
-    const geo=s.mesh.geometry;
-    if(!geo||!geo.attributes.position) return;
-    const pos=geo.attributes.position;
-    const idx=geo.index;
-    const triCount = idx ? idx.count/3 : pos.count/3;
-    for(let t=0;t<triCount;t++){
-      let ia,ib,ic;
-      if(idx){ ia=idx.getX(t*3); ib=idx.getX(t*3+1); ic=idx.getX(t*3+2); }
-      else { ia=t*3; ib=t*3+1; ic=t*3+2; }
-      _wa.fromBufferAttribute(pos,ia); s.mesh.localToWorld(_wa);
-      _wb.fromBufferAttribute(pos,ib); s.mesh.localToWorld(_wb);
-      _wc.fromBufferAttribute(pos,ic); s.mesh.localToWorld(_wc);
-      // Divergence term: v0 · (v1 × v2)
-      const cross = new THREE.Vector3().crossVectors(_wb,_wc);
-      signedVol += _wa.dot(cross) / 6;
+// Superficies que limitan la zona: las propias MÁS las particiones
+// compartidas cuya cara vecina es esta zona.
+// `prestada` marca una partición compartida que pertenece a OTRA zona y
+// que para ésta hace de cerramiento. Se guarda con el giro de su zona
+// propietaria, así que para la vecina apunta hacia dentro: sin corregirla
+// su pirámide se resta en vez de sumarse y la vecina pierde ese trozo.
+// No se corrige invirtiendo el giro a ciegas —la triangulación del
+// importador no garantiza qué sentido quedó guardado— sino orientándola
+// geométricamente: una cara prestada SIEMPRE limita la zona, así que su
+// aportación es positiva vista desde el centroide.
+function _supsDeZona(zoneId){
+  const out = [];
+  surfaces.forEach(s => {
+    if(!s.mesh || !s.mesh.geometry) return;
+    if(s.zoneId === zoneId) out.push({s, prestada:false});
+    else if(s.partition === 'shared' && s.neighborZoneId === zoneId) out.push({s, prestada:true});
+  });
+  return out;
+}
+
+// Diagnóstico topológico del cierre de la zona. Devuelve:
+//   pareadas    — fracción de aristas compartidas por exactamente 2 caras.
+//                 1 = cierre estanco; menos, hay huecos.
+//   giroMal     — fracción de esas parejas que recorren la arista en el
+//                 MISMO sentido. En una malla con giro coherente dos caras
+//                 vecinas siempre recorren su arista común en sentidos
+//                 opuestos, así que cualquier valor > 0 delata caras
+//                 invertidas. Es una prueba topológica: no la confunden ni
+//                 las concavidades ni las particiones interiores.
+//   noManifold  — fracción de aristas con más de 2 caras. Aparecen donde
+//                 una partición interior se encuentra con la envolvente;
+//                 avisan de que el conjunto no es un sólido simple.
+function _cierreZona(items){
+  const und = new Map();     // arista sin dirección → sentidos con que se recorre
+  const PREC = 1e3;
+  const k = (x,y,z)=>`${Math.round(x*PREC)},${Math.round(y*PREC)},${Math.round(z*PREC)}`;
+  const _v = new THREE.Vector3();
+  let nAristas = 0;
+  items.forEach(({s, prestada})=>{
+    const geo = s.mesh.geometry, pos = geo.attributes.position, idx = geo.index;
+    const nT = idx ? idx.count/3 : pos.count/3;
+    for(let t=0;t<nT;t++){
+      const ks=[];
+      for(let e=0;e<3;e++){
+        const i = idx ? idx.getX(t*3+e) : t*3+e;
+        _v.fromBufferAttribute(pos,i); s.mesh.localToWorld(_v);
+        ks.push(k(_v.x,_v.y,_v.z));
+      }
+      // La cara prestada se recorre al revés SOLO para la prueba de
+      // paridad de sentidos, que es lo que la hace coherente con las
+      // caras propias de esta zona.
+      if(prestada) ks.reverse();
+      for(let e=0;e<3;e++){
+        const a=ks[e], b=ks[(e+1)%3];
+        if(a===b) continue;
+        const ek = a<b ? a+'|'+b : b+'|'+a;
+        if(!und.has(ek)) und.set(ek,[]);
+        und.get(ek).push(a<b ? 1 : -1);
+        nAristas++;
+      }
     }
   });
-  let vol = Math.abs(signedVol);
+  if(nAristas===0) return {pareadas:0, giroMal:0, noManifold:0};
 
-  // If result is near zero (open shell), fallback to bounding-box * packing factor
-  if(vol < 0.5){
-    const box = new THREE.Box3();
-    ss.forEach(s=>{ const b=new THREE.Box3().setFromObject(s.mesh); box.union(b); });
-    const size = new THREE.Vector3(); box.getSize(size);
-    vol = size.x * size.y * size.z * 0.6; // 60% packing factor for open shells
+  let pareadas=0, nm=0, nPar=0, mal=0;
+  und.forEach(dirs=>{
+    if(dirs.length===2){
+      pareadas += 2; nPar++;
+      // Con giro coherente las dos caras recorren su arista común en
+      // sentidos OPUESTOS. Si coinciden, una de las dos está invertida.
+      // La prueba se hace SOLO sobre aristas 2-manifold: en una arista
+      // con tres caras (donde una partición interior toca la envolvente)
+      // la coincidencia de sentidos es normal y no indica nada.
+      if(dirs[0] === dirs[1]) mal++;
+    } else if(dirs.length>2) nm += dirs.length;
+  });
+
+  return {
+    pareadas: pareadas/nAristas,
+    giroMal:  nPar>0 ? mal/nPar : 0,
+    noManifold: nm/nAristas
+  };
+}
+
+// Calcula el volumen de una zona. Devuelve {V, cierre, metodo} y deja el
+// resultado en z.volume.
+function autoCalcZoneVolume(zoneId, silencioso){
+  const z = zones.find(x=>x.id===zoneId);
+  if(!z) return null;
+  const items = _supsDeZona(zoneId);
+  if(items.length===0){
+    z.volume = Math.max(1, z.volume||1);
+    z._volCierre = 0; z._volMetodo = 'sin superficies';
+    z._volDiag = {pareadas:0, giroMal:0, noManifold:0};
+    return {V:z.volume, cierre:0, metodo:'sin superficies', diag:z._volDiag};
   }
 
-  z.volume = Math.max(1, parseFloat(vol.toFixed(2)));
+  // ── Caja envolvente: cota superior y respaldo ─────────────────────
+  const box = new THREE.Box3();
+  items.forEach(({s})=>{ box.union(new THREE.Box3().setFromObject(s.mesh)); });
+  const size = new THREE.Vector3(); box.getSize(size);
+  const Vbox = Math.max(0, size.x*size.y*size.z);
+  const g = new THREE.Vector3(); box.getCenter(g);   // origen de integración
+
+  // ── Divergencia desde el centroide, con orientación por normal ────
+  // Integrar desde g en vez de desde el origen del mundo hace el
+  // resultado invariante a traslación también con el cierre incompleto.
+  // Orientar cada tetraedro por su propia normal (en vez de fiarse del
+  // sentido de giro del archivo) lo hace inmune a caras invertidas.
+  // Para cada triángulo, det = a·(b×c) es SEIS veces el volumen con signo
+  // del tetraedro (g,a,b,c), y su signo lo fija el sentido de giro.
+  //  · Vfirmado = |Σ det|/6  → exacto para un cierre con giro coherente,
+  //    también en recintos no convexos (las concavidades se restan solas).
+  //  · Vabs     = Σ|det|/6   → ignora el sentido de giro, así que una cara
+  //    invertida ya no cancela; exacto si la zona es estrellada respecto a
+  //    su centroide, que es el caso de cualquier recinto habitable normal.
+  // Comparándolos se DIAGNOSTICA el problema en vez de taparlo: si
+  // coinciden, el giro es coherente y se usa el exacto; si no, el modelo
+  // trae normales mezcladas y se usa el robusto, avisando.
+  let Vfirm = 0, Vabs = 0;
+  const a=new THREE.Vector3(), b=new THREE.Vector3(), c=new THREE.Vector3();
+  const cr=new THREE.Vector3();
+  items.forEach(({s, prestada})=>{
+    const geo=s.mesh.geometry;
+    if(!geo || !geo.attributes.position) return;
+    const pos=geo.attributes.position, idx=geo.index;
+    const nT = idx ? idx.count/3 : pos.count/3;
+    for(let t=0;t<nT;t++){
+      const ia = idx ? idx.getX(t*3)   : t*3;
+      const ib = idx ? idx.getX(t*3+1) : t*3+1;
+      const ic = idx ? idx.getX(t*3+2) : t*3+2;
+      a.fromBufferAttribute(pos,ia); s.mesh.localToWorld(a);
+      b.fromBufferAttribute(pos,ib); s.mesh.localToWorld(b);
+      c.fromBufferAttribute(pos,ic); s.mesh.localToWorld(c);
+      a.sub(g); b.sub(g); c.sub(g);
+      cr.crossVectors(b,c);
+      const det = a.dot(cr);
+      if(!isFinite(det)) continue;
+      // Prestada: limita la zona con certeza, así que aporta en positivo
+      // sea cual sea el sentido con que la guardó su zona propietaria.
+      Vfirm += prestada ? Math.abs(det) : det;
+      Vabs  += Math.abs(det);
+    }
+  });
+  Vfirm = Math.abs(Vfirm)/6;
+  Vabs  = Vabs/6;
+
+  const diag = _cierreZona(items);
+  const cierre = diag.pareadas;
+  // El giro se juzga por TOPOLOGÍA, no comparando las dos integrales: una
+  // partición interior hace que difieran aunque el giro sea perfecto.
+  // Umbral del 8 %. Una cara realmente invertida voltea TODAS sus aristas:
+  // una sola cara de una caja de seis da el 22 %, y tres dan el 33 %. Por
+  // debajo del 8 % lo que se ve es ruido del exportador —planos escritos
+  // con dos redondeos distintos, triángulos colapsados—, que no justifica
+  // renunciar a la integral exacta. Medido: 1,6 % en el OBJ de IngeTrazo y
+  // 4,1 % en el de SketchUp, ambos con el giro esencialmente coherente.
+  const giroCoherente = diag.giroMal <= 0.08;
+  let V = giroCoherente ? Vfirm : Vabs;
+  let metodo = giroCoherente ? 'divergencia' : 'divergencia (giro mixto)';
+
+  // ── Control de sanidad contra la caja envolvente ──────────────────
+  // El volumen de un recinto no puede superar su caja ni ser una
+  // fracción ínfima de ella. Fuera de ese rango el cierre está tan roto
+  // que la integral no significa nada: se usa la caja y se dice.
+  if(!isFinite(V) || Vbox <= 0 || V > Vbox*1.02 || V < Vbox*0.05){
+    V = Vbox > 0 ? Vbox : Math.max(1, z.volume||1);
+    metodo = 'caja envolvente';
+  }
+
+  z.volume = Math.max(1, parseFloat(V.toFixed(2)));
+  z._volCierre = cierre;
+  z._volMetodo = metodo;
+  z._volDiag   = diag;
+
+  z._volGiro = giroCoherente;
+
+  if(!silencioso){
+    if(!giroCoherente && metodo !== 'caja envolvente'){
+      log(`⚠ Zona "${z.name}": el modelo trae caras con el giro invertido. ` +
+          `El volumen (${z.volume} m³) se calculó por el método robusto. ` +
+          'Revisa con Selección → Normales sospechosas: las mismas caras ' +
+          'invertidas dejan superficies sin sol y sin cielo.', 'warn');
+    }
+    if(metodo === 'caja envolvente'){
+      log(`⚠ Zona "${z.name}": el cierre no permite integrar el volumen. ` +
+          `Se usa la caja envolvente (${z.volume} m³), que es una COTA SUPERIOR. ` +
+          'Corrígelo a mano si el recinto no es prismático.', 'warn');
+    } else if(cierre < 0.98){
+      log(`⚠ Zona "${z.name}": ${z.volume} m³, pero el cierre está incompleto ` +
+          `(${(cierre*100).toFixed(0)}% de aristas pareadas). Faltan caras —suelo, ` +
+          'techo o una partición sin asignar—, así que el valor es aproximado.', 'warn');
+    }
+    if(diag.noManifold > 0.02){
+      log(`⚠ Zona "${z.name}": hay caras INTERIORES dentro del recinto ` +
+          `(${(diag.noManifold*100).toFixed(0)}% de aristas con más de dos caras). ` +
+          'Suelen ser particiones que deberían pertenecer a otra zona o marcarse ' +
+          'como compartidas. Mientras estén ahí el volumen es orientativo: ' +
+          'compruébalo e introdúcelo a mano si hace falta.', 'warn');
+    }
+  }
+  return {V:z.volume, cierre, metodo, diag};
 }
 
 // ═══════════════════════════════════════
@@ -11693,11 +11942,12 @@ function showSurfProps(surf){
         No contribuye a conducción, ganancia solar ni admitancia.<br>
         Útil para particiones interiores o límites sin intercambio real.
       </div>` : ''}
-      ${(surf.tag||autoTag(surf))==='piso' ? (()=>{
-        // v2.9: Control manual de contacto con terreno. Por defecto los pisos
-        // se asumen en contacto (legado), pero el usuario puede marcarlos
-        // como elevados (sobre voladizo, columnas, espacio no climatizado).
-        const gc = (surf.groundContact !== false);
+      ${admiteContactoTerreno(surf) ? (()=>{
+        // v11.7: la casilla aparece en 'piso' Y en 'losa', porque ambas son
+        // horizontales hacia abajo y en ambas se lee el dato. Lo que muestra
+        // es lo que de verdad usara el motor (ver esPisoEnTerreno): marcado
+        // por defecto en 'piso', desmarcado en 'losa'.
+        const gc = esPisoEnTerreno(surf);
         return `
       <div style="margin-top:5px;padding:6px 8px;background:rgba(140,170,90,0.10);border:1px solid rgba(140,170,90,0.40);border-radius:5px;font-size:.6rem;color:#456020;line-height:1.5">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
@@ -11708,8 +11958,12 @@ function showSurfProps(surf){
         </label>
         <div style="margin-top:4px;font-size:.55rem;color:#666;line-height:1.45">
           ${gc
-            ? '<b style="color:#3a6020">Piso/losa apoyado en el suelo</b> — calor intercambiado con la temperatura del terreno (GT) según ISO 13370. Apropiado para soleras, losas de contrapiso, sótanos.'
-            : '<b style="color:#a05030">Piso/losa elevado</b> — intercambia calor con el aire exterior (Te). Apropiado para voladizos, pisos sobre columnas, sobre garajes o espacios no climatizados.'}
+            ? '<b style="color:#3a6020">Apoyado en el suelo</b> — intercambia calor con la temperatura del terreno (GT, media anual amortiguada) según ISO 13370. Para soleras, losas de contrapiso y sótanos.'
+            : '<b style="color:#a05030">Elevado o interior</b> — intercambia calor con el aire exterior (Te) y con el sol. Para voladizos, pisos sobre columnas y entrepisos.'}
+          <div style="margin-top:3px;font-size:.54rem;color:#777">
+            Es la única clase de superficie donde este dato se lee: en muros,
+            cubiertas y ventanas no interviene en ningún cálculo.
+          </div>
         </div>
       </div>`;
       })() : ''}</div>
@@ -17395,7 +17649,11 @@ function _snapState(){
       partition: s.partition || null,
       neighborZoneId: s.neighborZoneId || null,
       // v2.9: contacto con terreno para pisos
-      groundContact: s.groundContact !== false,
+      // v11.7: el contacto con el terreno solo existe en horizontales hacia
+      // abajo. En un muro o una ventana el dato no se lee en ningun calculo,
+      // asi que tampoco se guarda: antes se escribia `true` en TODAS las
+      // superficies y parecia que el modelo llevaba el edificio enterrado.
+      groundContact: admiteContactoTerreno(s) ? esPisoEnTerreno(s) : undefined,
       normalFlip: s.normalFlip === true,      // v7.3
       layers: s.layers ? s.layers.map(l=>({...l})) : [],
       px:p?.x??0, py:p?.y??0, pz:p?.z??0,
@@ -17431,7 +17689,10 @@ function _restoreState(snap){
     const {id,name,area,zoneId,exterior,tag,layers,px,py,pz,ry,color,verts}=snapItem;
     const partition = snapItem.partition || null;
     const neighborZoneId = snapItem.neighborZoneId || null;
-    const groundContact = snapItem.groundContact !== false;  // v2.9
+    // v11.7: `undefined` es un valor valido — significa «decide por la
+    // etiqueta». Solo se conserva una decision explicita del usuario.
+    const groundContact = (snapItem.groundContact === undefined)
+      ? undefined : !!snapItem.groundContact;
     const normalFlip    = snapItem.normalFlip === true;     // v7.3
     let s=surfaces.find(x=>x.id===id);
     if(!s){
@@ -17798,6 +18059,7 @@ let _shadowCacheKey = '';      // JSON of surface ids+positions to detect change
 
 // Mark dirty whenever geometry changes — also updates UI indicator
 function invalidateShadowCache(){
+  _nivelBajoModelo = null;   // v11.7: la cota más baja puede haber cambiado
   _shadowCacheDirty=true;
   _snapCacheDirty=true; // snap cache siempre se invalida junto con sombras
   // Actualizar indicador UI inmediatamente si existe
@@ -18597,9 +18859,9 @@ function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rh
       if(_esAdiab){ _addAdmittance(s, p, zi, H, Q, bufIdx); return; }
       const isGlaz     = sg ? sg.isGlaz     : /ventana|window|vidrio|glass|cristal|glazing|acristal|claraboya|skylight|lucernario|tragaluz/.test(s.name.toLowerCase());
       const isFloor    = sg ? sg.isFloor    : /piso|floor|suelo|ground/.test(s.name.toLowerCase());
-      // v2.9: piso elevado (groundContact:false) NO se acopla al terreno.
-      // Por defecto: groundContact===undefined ≡ true (legado).
-      const isFloorGround = isFloor && (s.groundContact !== false);
+      // v11.7: criterio único (ver esPisoEnTerreno). Antes aquí 'losa'
+      // acoplaba al terreno y en los otros dos sitios no.
+      const isFloorGround = esPisoEnTerreno(s);
       const solarF     = sg ? sg.solarFactor : (isFloor ? 0 : 0.5);
       const shgc       = sg ? sg.shgc : (s.shgc||0.6);
 
@@ -18842,7 +19104,7 @@ function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rh
     const L=zobj._loads;
     const Ti=T[zi];
     const ssv=surfaces.filter(s=>s.zoneId===zid);
-    const floorAreaZ=ssv.filter(s=>{ const t=s.tag||autoTag(s); return t==='piso'; }).reduce((a,s)=>a+s.area,0)||
+    const floorAreaZ=ssv.filter(s=>_TAGS_PISO.includes(s.tag||autoTag(s))).reduce((a,s)=>a+s.area,0)||
                      Math.max(1,ssv.reduce((a,s)=>a+s.area,0)/6);
 
     // ── Schedules for ventilation and infiltration ──────────────────
@@ -18888,7 +19150,7 @@ function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rh
     ensureZoneLoads(zobj);
     const L=zobj._loads;
     const ss=surfaces.filter(s=>s.zoneId===zid);
-    const floorA=ss.filter(s=>{ const t=s.tag||autoTag(s); return t==='piso'; }).reduce((a,s)=>a+s.area,0)||
+    const floorA=ss.filter(s=>_TAGS_PISO.includes(s.tag||autoTag(s))).reduce((a,s)=>a+s.area,0)||
                  Math.max(1, ss.reduce((a,s)=>a+s.area,0)/6);
 
     // Schedules guaranteed non-null by ensureZoneLoads() → read directly
@@ -19444,9 +19706,9 @@ async function simular(){
           // elevado, sobre voladizo o espacio no climatizado), el piso
           // intercambia con el aire exterior Te como una superficie opaca
           // común (sol-air formula). groundContact undefined ≡ true (legado).
-          // v5.4: una losa (tag='losa') nunca está en contacto con terreno
+          // v11.7: criterio único (ver esPisoEnTerreno).
           // independientemente de groundContact. Solo 'piso' activa ISO 13370.
-          const isFloorGround = sg.isFloor && (s.tag !== 'losa') && (s.groundContact !== false);
+          const isFloorGround = esPisoEnTerreno(s);
 
           if(sg.isGlaz){
             Tex_eb = isFinite(Te) ? Te : 20;
@@ -19550,7 +19812,7 @@ async function simular(){
           const L=zobj._loads;
           const Ti_old=T[zi];
           const ssv=surfaces.filter(s=>s.zoneId===zid);
-          const floorAreaEB=ssv.filter(s=>(s.tag||autoTag(s))==='piso').reduce((a,s)=>a+s.area,0)
+          const floorAreaEB=ssv.filter(s=>_TAGS_PISO.includes(s.tag||autoTag(s))).reduce((a,s)=>a+s.area,0)
                             || Math.max(1,ssv.reduce((a,s)=>a+s.area,0)/6);
 
           // Apply schedules to eBalance pre-solver (mirror solver logic)
@@ -19698,7 +19960,7 @@ async function simular(){
 
           // Q_int_peak for this zone
           const ssZ = surfaces.filter(s=>s.zoneId===z0.id);
-          const flA0 = ssZ.filter(s=>(s.tag||autoTag(s))==='piso').reduce((a,s)=>a+s.area,0)||Math.max(1,z0.volume/3);
+          const flA0 = ssZ.filter(s=>_TAGS_PISO.includes(s.tag||autoTag(s))).reduce((a,s)=>a+s.area,0)||Math.max(1,z0.volume/3);
           // v6.3: priorizar occCount también en diagnóstico de cargas internas
           const occCount0 = (L0.occCount > 0) ? L0.occCount : ((L0.occDensity||0) * flA0);
           const Q_int0 = occCount0*80*(L0.occMet||1.2) + (L0.lightLoad||10)*flA0 + (L0.equipLoad||5)*flA0;
@@ -19729,7 +19991,7 @@ async function simular(){
       thermalZones.forEach((tz, zi) => {
         const ebZ = eBalance[zi]; if(!ebZ) return;
         const ssZ = surfaces.filter(s=>s.zoneId===tz.id);
-        const flAreaZ = ssZ.filter(s=>(s.tag||autoTag(s))==='piso').reduce((a,s)=>a+s.area,0);
+        const flAreaZ = ssZ.filter(s=>_TAGS_PISO.includes(s.tag||autoTag(s))).reduce((a,s)=>a+s.area,0);
         if(flAreaZ <= 0) return;
         const eq_kwh_m2 = (ebZ.gainEquip/1000) / flAreaZ;
         const li_kwh_m2 = (ebZ.gainLighting/1000) / flAreaZ;
@@ -19988,7 +20250,7 @@ function _computeSeasonBalance(periodHours, thermalZones){
     ensureZoneLoads(z);
     const C_air = rhoA * CpA * z.volume;
     const ssZ = surfaces.filter(s => s.zoneId === z.id);
-    const floorA = ssZ.filter(s => (s.tag || autoTag(s)) === 'piso').reduce((a,s) => a+s.area, 0)
+    const floorA = ssZ.filter(s => _TAGS_PISO.includes(s.tag || autoTag(s))).reduce((a,s) => a+s.area, 0)
                 || Math.max(1, z.volume/3);
     const C_furn = 100000 * floorA;
     zMap[z.id] = { C: C_air + C_furn, volume: z.volume };
@@ -20029,7 +20291,7 @@ function _computeSeasonBalance(periodHours, thermalZones){
       const p = surfParams[s.id]; if(!p || !isFinite(p.U) || p.U <= 0) return;
       const Ti_old = T[zi]; if(!isFinite(Ti_old)) return;
       // v5.4: solo 'piso' activa ISO 13370. 'losa' es interior, no toca terreno.
-      const isFloorGround = sg.isFloor && (s.tag !== 'losa') && (s.groundContact !== false);
+      const isFloorGround = esPisoEnTerreno(s);
       let Tex_eb, UA_eb;
       if(sg.isGlaz){
         Tex_eb = Te;
@@ -22593,6 +22855,46 @@ function zdSaveLClamped(field, val, maxVal, etiqueta){
 //   · iluminación y equipos (W/m² × área de piso) valían cero en la
 //     simulación aunque el panel mostrara sus vatios.
 const _TAGS_PISO = ['piso', 'losa'];
+
+// ═══════════════════════════════════════════════════════════════════════
+// 🌱  CONTACTO CON EL TERRENO — CRITERIO ÚNICO (v11.7)
+// ═══════════════════════════════════════════════════════════════════════
+// Hasta v11.6 la pregunta «¿esta superficie toca el terreno?» se respondía
+// con DOS criterios distintos según quién preguntara:
+//
+//   _cibseHourBalance (temperatura del aire):
+//       isFloor && groundContact !== false              → 'losa' SÍ acopla
+//   simular (TMR) y _computeSeasonBalance (balance estacional):
+//       isFloor && tag !== 'losa' && groundContact !== false → 'losa' NO acopla
+//
+// Es decir: la misma losa se resolvía contra la temperatura del terreno
+// para calcular la temperatura del aire, y contra la temperatura sol-aire
+// para repartir el balance y la TMR. Medido en una caja de 8×6×3 m con el
+// EPW de Vijes, el mismo piso etiquetado 'losa' o 'piso' daba 31,6 °C
+// frente a 34,0 °C de máxima y 24,96 frente a 25,83 °C de media.
+//
+// Ahora hay una sola función, y todos preguntan por ella.
+//
+// El valor por defecto depende de la etiqueta, que es lo que significan
+// los rótulos de la interfaz: «Piso (contacto con terreno)» acopla al
+// terreno; «Losa (entrepiso)» no. La casilla del panel de propiedades
+// manda sobre ambos cuando el usuario la toca.
+function esPisoEnTerreno(s){
+  if(!s) return false;
+  const tag = s.tag || autoTag(s);
+  if(tag !== 'piso' && tag !== 'losa') return false;   // no es horizontal-abajo
+  if(s.groundContact === true)  return true;           // decisión explícita
+  if(s.groundContact === false) return false;          // decisión explícita
+  return tag === 'piso';                               // por defecto, según etiqueta
+}
+
+// ¿Tiene sentido preguntarle a esta superficie si toca el terreno? Solo
+// los horizontales hacia abajo. En un muro, una cubierta o una ventana el
+// dato no se lee en ningún cálculo, así que tampoco se guarda.
+function admiteContactoTerreno(s){
+  const tag = s && (s.tag || autoTag(s));
+  return tag === 'piso' || tag === 'losa';
+}
 function _zoneFloorArea(zid){
   return surfaces
     .filter(s => s.zoneId === zid && _TAGS_PISO.includes(s.tag || autoTag(s)))
@@ -24596,7 +24898,7 @@ function guardarProyectoAs(evt){
           partition: s.partition || null,
           neighborZoneId: s.neighborZoneId || null,
           // v2.9: contacto con terreno para pisos (default true)
-          groundContact: s.groundContact !== false,
+          groundContact: admiteContactoTerreno(s) ? esPisoEnTerreno(s) : undefined,
           normalFlip: s.normalFlip === true,   // v7.3: normal invertida por el usuario
           position:[s.mesh.position.x,s.mesh.position.y,s.mesh.position.z],
           rotation:[s.mesh.rotation.x,s.mesh.rotation.y,s.mesh.rotation.z],
@@ -24960,7 +25262,7 @@ function _cargarProyectoData(proj){
         partition: sd.partition || null,
         neighborZoneId: sd.neighborZoneId || null,
         // v2.9: contacto con terreno (proyectos antiguos sin campo → true)
-        groundContact: sd.groundContact !== false,
+        groundContact: (sd.groundContact === undefined) ? undefined : !!sd.groundContact,
         normalFlip: sd.normalFlip === true};   // v7.3
       surfaces.push(surf);
       aplicarColorMaterial(surf);
@@ -25810,7 +26112,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.6
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v11.7
   </div>
 </div>
 <script>
@@ -26778,7 +27080,7 @@ function actualizarRadiacion(){
     if(s.exterior){
       partKind = 'ext'; partLbl = 'Exterior'; partColor = '#ffaa44';
       partTip = 'Superficie exterior expuesta a la intemperie (recibe radiación directa, difusa y reflejada)';
-    } else if(stag3 === 'piso' && (s.groundContact !== false)){
+    } else if(esPisoEnTerreno(s)){
       partKind = 'grd'; partLbl = 'Terreno'; partColor = '#a08858';
       partTip = 'Superficie en contacto con el terreno (radiación solar nula; recibe radiación transmitida por ventanas)';
     } else if(s.partition === 'shared'){
@@ -27281,7 +27583,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.6</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v11.7</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -27354,6 +27656,36 @@ function mostrarAcercaDeNuevo(){
           y por etiqueta, y plano de sección arrastrable.</li>
       </ul>
 
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v11.7</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Volumen de zona.</strong> Se integraba
+          por el teorema de la divergencia sin garantizar sus tres condiciones. Con el cierre
+          incompleto —lo normal, porque una partición interzonal pertenece a una sola zona— la fórmula
+          deja de ser invariante a traslación: la misma caja de 72 m³ a la que le falta un muro daba
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">48 m³</span> en el origen y
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">3 999 952 m³</span> con coordenadas de proyecto, y una sola cara
+          invertida la dejaba en 24 m³. Ahora se integra desde el centroide de la zona, se incluyen
+          las particiones de la zona vecina orientadas hacia fuera, el giro invertido se detecta por
+          topología, y el resultado se acota contra la caja envolvente. El motor avisa cuando el cierre
+          está incompleto, cuando hay caras con el giro invertido y cuando la zona contiene caras
+          interiores. El volumen multiplica la infiltración y la ventilación y fija la capacidad
+          térmica del aire, así que el error se trasladaba íntegro a la temperatura.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Contacto con el terreno.</strong> La
+          pregunta «¿esta superficie toca el terreno?» se respondía con dos criterios distintos: el
+          balance horario de temperatura acoplaba las losas al terreno y el cálculo de TMR y el
+          balance estacional no. La misma superficie se resolvía contra la temperatura del terreno
+          para una cosa y contra la sol-aire para otra, con 2,3 K de diferencia en la máxima. Ahora
+          hay un solo criterio. Además, toda horizontal hacia abajo se etiquetaba
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">losa</span> (entrepiso), de modo que la solera de un modelo
+          importado entraba sin contacto con el suelo; ahora la del nivel más bajo se etiqueta
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">piso</span>. Y el indicador dejó de escribirse en muros,
+          cubiertas y ventanas, donde no se lee en ningún cálculo.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Área de piso.</strong> Seis cálculos del
+          motor —cargas internas por m², ventilación por persona y por área— sumaban solo las
+          superficies etiquetadas <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">piso</span> e ignoraban las
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">losa</span>, cayendo a un sustituto de V/3.</li>
+      </ul>
+
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Limitaciones conocidas</div>
       <ul style="padding-left:20px;margin:8px 0">
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Cielo difuso isótropo</strong> (Liu–Jordan). No incorpora
@@ -27413,6 +27745,13 @@ function mostrarAcercaDeNuevo(){
           ni puesta en régimen. No aplica factores de seguridad. La carga latente se calcula por consigna de
           humedad, válido para estimar la carga pero no para conocer la humedad interior en régimen libre.
           Sirve para <strong style="color:var(--text)">comparar alternativas</strong>, no para seleccionar equipo.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El volumen de zona es una medida
+          geométrica, no un dato declarado.</strong> Es exacto cuando el cierre de la zona está completo
+          y con el giro coherente. Si faltan caras se pierde la pirámide del hueco (una caja de 72 m³
+          sin un muro da 60), y si la zona contiene particiones interiores sin asignar a otra zona, el
+          resultado se desvía unos puntos porcentuales. El motor avisa en ambos casos y el valor se
+          puede escribir a mano en las propiedades de la zona; conviene hacerlo siempre que aparezca
+          el aviso, porque el volumen multiplica la infiltración y la ventilación.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">No ha sido validada</strong> según
           <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ASHRAE 140</span> ni ningún otro protocolo de contraste. No debe usarse para
           certificación energética, verificación normativa ni justificación de cumplimiento.</li>
