@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.7</title>
+<title>BioSim v12.8</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.7</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.8</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
@@ -4829,7 +4829,21 @@ canvas#cv{display:block;}
               <div style="font-size:.6rem;color:var(--text3)" id="shadowCacheStat">
                 Sombras: <span style="color:var(--warn)">⚠ pendiente</span>
               </div>
-              <button class="btn btn-g btn-xs" onclick="invalidateShadowCache();document.getElementById('shadowCacheStat').innerHTML='Sombras: <span style=&quot;color:var(--warn)&quot;>⚠ pendiente</span>';log('Caché de sombras descartada — se recalculará al simular.','ok')">↺ Recalcular</button>
+              <button class="btn btn-g btn-xs" onclick="invalidateShadowCache();log('Cachés de sombras y de vista al cielo descartados — se recalcularán al simular.','ok')">↺ Recalcular</button>
+            </div>
+
+            <!-- v12.8: modelo solar del balance térmico -->
+            <div style="margin-bottom:7px;background:var(--bg3);border-radius:4px;padding:6px 8px;border-left:3px solid var(--accent2)">
+              <label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;font-size:.62rem;color:var(--text2);font-weight:600"
+                title="Activado (recomendado): el balance usa la misma irradiancia que el informe de radiación — haz proyectado por el coseno de incidencia, difusa con el factor de vista al cielo medido por trazado de rayos, reflejada del terreno y SHGC corregido por ángulo. Desactivado: vuelve a la aproximación CIBSE simplificada de v12.7 y anteriores, que no distingue orientación ni protección solar.">
+                <input type="checkbox" id="balSolarDetalle" checked style="cursor:pointer;margin-top:2px"
+                  onchange="log(this.checked?'Balance térmico: irradiancia detallada (v12.8) — se aplicará en la próxima simulación.':'Balance térmico: irradiancia CIBSE simplificada (modo v12.7) — se aplicará en la próxima simulación.','info')">
+                <span>Irradiancia detallada en el balance</span>
+              </label>
+              <div style="font-size:.57rem;color:var(--text3);margin-top:3px;line-height:1.5">
+                Proyecta el haz, mide la obstrucción del cielo y añade la reflejada del terreno.
+                Desactívalo solo para reproducir resultados de v12.7 o anteriores.
+              </div>
             </div>
 
             <!-- v6.2: el análisis por período se movió a la pestaña Temporadas.
@@ -5004,7 +5018,7 @@ canvas#cv{display:block;}
             Vista al cielo
           </label>
           <label style="display:flex;align-items:center;gap:3px;cursor:pointer;font-size:.6rem;color:var(--text2);padding:2px 5px;background:var(--bg3);border:1px solid var(--border);border-radius:4px"
-            title="Cielo anisótropo de Perez et al. (1990) en lugar del isótropo de Liu-Jordan. Reparte la difusa en tres componentes —fondo isótropo, aureola circunsolar y brillo de horizonte— según la claridad y el brillo del cielo de cada hora, leídos del propio EPW. Afecta SOLO a este análisis de radiación incidente: el balance térmico usa la difusa simplificada del método de las admitancias CIBSE.">
+            title="Cielo anisótropo de Perez et al. (1990) en lugar del isótropo de Liu-Jordan. Reparte la difusa en tres componentes —fondo isótropo, aureola circunsolar y brillo de horizonte— según la claridad y el brillo del cielo de cada hora, leídos del propio EPW. Desde v12.8 afecta también al balance térmico, que usa la misma irradiancia que este análisis.">
             <input type="checkbox" id="radPerez" style="cursor:pointer" onchange="actualizarRadiacion()">
             Cielo Perez
           </label>
@@ -5221,6 +5235,27 @@ canvas#cv{display:block;}
             style="flex:1;height:4px;accent-color:var(--accent)"
             oninput="spSetDiagramScale(+this.value)">
           <span id="spDiagramScaleLbl" style="font-size:.62rem;color:var(--text3);width:28px;text-align:right">×1.0</span>
+        </div>
+
+        <!-- v12.8: capas del diagrama solar -->
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:5px 7px;margin-top:3px">
+          <div style="font-size:.55rem;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">☀ Capas del diagrama</div>
+          <label class="sp-chk-row" title="Superficie translúcida que barre el sol entre los dos solsticios. Lo que queda dentro de la banda recibe sol en algún momento del año; lo de fuera, nunca.">
+            <input type="checkbox" id="spOptBanda" checked onchange="setSunPathOpt('banda',this.checked)">
+            <span>Banda solar anual</span>
+          </label>
+          <label class="sp-chk-row" title="El ocho que describe el sol al mirarlo a la misma hora a lo largo del año.">
+            <input type="checkbox" id="spOptAnal" checked onchange="setSunPathOpt('anal',this.checked)">
+            <span>Analemas horarios</span>
+          </label>
+          <label class="sp-chk-row" title="Numerales de hora, pastillas con el día de cada trayectoria y grados de la brújula.">
+            <input type="checkbox" id="spOptEtiq" checked onchange="setSunPathOpt('etiq',this.checked)">
+            <span>Etiquetas</span>
+          </label>
+          <label class="sp-chk-row" title="Círculos concéntricos de 15° en 15° para leer la altura solar sobre el plano.">
+            <input type="checkbox" id="spOptAlt" checked onchange="setSunPathOpt('alt',this.checked)">
+            <span>Anillos de altitud</span>
+          </label>
         </div>
 
         <!-- Posición del diagrama solar (v2.7) -->
@@ -5603,7 +5638,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.7 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.8 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -15167,344 +15202,412 @@ function updateNorthWidget(){
   if(_spReady) spRefresh();
 }
 
-// ════════════════════════════════════════════════════
-//  LEGACY renderSunPath (3D scene overlay — unchanged)
-// ════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  DIAGRAMA SOLAR 3D  —  rediseño v12.8
+//
+//  Antes: ocho trayectorias de colores distintos (azul, cian, verde, lima,
+//  naranja), doce radios de azimut, anillos de altitud, eje de cenit con
+//  rótulo y un cartel oscuro con los datos del sol. Mucha tinta y poca
+//  jerarquía: nada decía qué mirar primero.
+//
+//  Ahora, siguiendo la lógica de la app de Análisis de Sitio:
+//    · una sola familia de color (ámbar) para todo el instrumento;
+//    · la BANDA SOLAR ANUAL translúcida como elemento dominante — de un
+//      vistazo se ve la porción de bóveda que el sol recorre en el año;
+//    · solsticios en línea continua, meses intermedios punteados;
+//    · analemas finos cruzando la banda;
+//    · marcadores esféricos en cada hora en punto, con su numeral;
+//    · etiqueta de mes en pastilla sólida, legible sobre cualquier fondo;
+//    · brújula graduada a 1° con norte en rojo;
+//    · el sol en rojo con halo, y su rayo punteado hasta el centro.
+//
+//  Los datos del sol (altura, azimut, declinación) NO se repiten en un
+//  cartel 3D: ya están en el panel SOLAR, y duplicarlos tapaba el modelo.
+//
+//  La paleta está calibrada para el fondo claro del visor de BioSim: el
+//  ámbar de la app de referencia (#e9cf5b) se lava sobre gris claro, así
+//  que aquí se usa un ámbar más profundo con el mismo papel.
+// ══════════════════════════════════════════════════════════════════════
+const SP_AMBAR   = 0xa8761a;   // líneas principales
+const SP_AMBAR_S = 0xc49a3e;   // líneas secundarias y analemas
+const SP_BANDA   = 0xd9a93a;   // relleno de la banda anual
+const SP_SOL     = 0xe8402a;   // sol y su rayo
+const SP_NORTE   = 0xd92d20;   // norte de la brújula
+const SP_TXT     = '#6b4a0d';  // numerales sobre fondo claro
+
+// Meses cuyo día 21 se dibuja. 6 y 12 son los solsticios (línea continua);
+// 3 equivale a 9 en trayectoria, así que con tres basta.
+let _spMeses      = [6, 3, 12];
+let _spBanda      = true;   // banda solar anual
+let _spAnalemas   = true;   // analemas horarios
+let _spEtiquetas  = true;   // numerales de hora y pastillas de mes
+let _spAnillosAlt = true;   // anillos de altitud sobre el plano
+
+const _SP_MES3 = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const _SP_DIAS_MES = [0,31,59,90,120,151,181,212,243,273,304,334];
+function _spDoyDia21(mes){ return _SP_DIAS_MES[mes-1] + 21; }
+
+// Altura y azimut directos desde latitud, declinación y ángulo horario.
+// Reproduce exactamente la trigonometría de spSunData(); se separa porque
+// la banda anual necesita barrer declinaciones que no son las de ningún
+// día concreto del año.
+function _spAltAz(latR, declR, haR){
+  const sinAlt = Math.sin(latR)*Math.sin(declR) + Math.cos(latR)*Math.cos(declR)*Math.cos(haR);
+  const alt = Math.asin(Math.max(-1, Math.min(1, sinAlt)));
+  const cosAz = (Math.sin(declR) - Math.sin(latR)*sinAlt) / (Math.cos(latR)*Math.cos(alt) + 1e-9);
+  let az = Math.acos(Math.max(-1, Math.min(1, cosAz)));
+  if(haR > 0) az = 2*Math.PI - az;
+  return { alt: alt*180/Math.PI, az: az*180/Math.PI };
+}
+
+// Parte una lista de posiciones solares en tramos continuos por encima
+// del horizonte, para no dibujar la rama que pasa por debajo.
+function _spTramos(lista, minAlt){
+  const m = (minAlt === undefined) ? 0 : minAlt;
+  const out = []; let cur = [];
+  for(const p of lista){
+    if(p.alt > m) cur.push(p);
+    else if(cur.length){ out.push(cur); cur = []; }
+  }
+  if(cur.length) out.push(cur);
+  return out;
+}
+
+// Sprite de texto. Con `bg` se dibuja como pastilla sólida redondeada.
+function _spTexto(txt, opts){
+  const o = opts || {};
+  const fuente = o.font || 'bold 44px system-ui, sans-serif';
+  const pad = o.pad || 0;
+  const med = document.createElement('canvas').getContext('2d');
+  med.font = fuente;
+  // OJO: parseInt('bold 44px …') devuelve NaN porque la cadena empieza por
+  // la variante, no por el tamaño. Hay que extraer los píxeles con patrón.
+  const mPx = /(\d+(?:\.\d+)?)px/.exec(fuente);
+  const px  = mPx ? parseFloat(mPx[1]) : 32;
+  const w = Math.ceil(med.measureText(txt).width) + pad*2 + 8;
+  const h = Math.ceil(px * 1.45) + pad*2;
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(8, w); cv.height = Math.max(8, h);
+  const cx = cv.getContext('2d');
+  if(o.bg){
+    cx.fillStyle = o.bg;
+    const r = Math.min(10, h/3);
+    if(cx.roundRect){ cx.beginPath(); cx.roundRect(0, 0, cv.width, cv.height, r); cx.fill(); }
+    else cx.fillRect(0, 0, cv.width, cv.height);
+  }
+  cx.font = fuente;
+  cx.fillStyle = o.color || SP_TXT;
+  cx.textAlign = 'center'; cx.textBaseline = 'middle';
+  cx.fillText(txt, cv.width/2, cv.height/2 + 1);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(cv), transparent: true, depthTest: false
+  }));
+  sp.renderOrder = 12;
+  return { sprite: sp, w: cv.width, h: cv.height };
+}
+
 function renderSunPath(){
-  if(_sunPathGroup){ scene.remove(_sunPathGroup); _sunPathGroup=null; }
-  _sunPathGroup=new THREE.Group(); _sunPathGroup.name='__sunpath__';
+  if(_sunPathGroup){ scene.remove(_sunPathGroup); _sunPathGroup = null; }
+  _sunPathGroup = new THREE.Group(); _sunPathGroup.name = '__sunpath__';
+  const G = _sunPathGroup;
 
-  const R=22*_sunPathScale;      // radio escalable
-  const Rg=R*1.02; // radio del anillo de suelo
-  const lat=_latitude;
+  const R   = 22 * _sunPathScale;     // radio de la bóveda
+  const Rg  = R * 1.02;               // radio del anillo de horizonte
+  const lat = _latitude;
+  const latR = lat * Math.PI / 180;
 
-  // ── Centro geométrico del modelo ──────────────────────────────────────
-  const _modelCenter = new THREE.Vector3(0, 0, 0);
-  let Y_BASE = 0.04; // fallback
+  // ── Centro geométrico del modelo ────────────────────────────────────
+  const C = new THREE.Vector3(0, 0, 0);
+  let Y_BASE = 0.04;
   if(surfaces && surfaces.length > 0){
     const bbox = new THREE.Box3();
-    surfaces.forEach(s=>{ if(s.mesh){ s.mesh.updateMatrixWorld(true); bbox.expandByObject(s.mesh); }});
-    if(!bbox.isEmpty()){
-      bbox.getCenter(_modelCenter);
-      Y_BASE = Math.max(0, bbox.min.y) + 0.04; // diagrama nace desde Y=0 mínimo
-    }
+    surfaces.forEach(s => { if(s.mesh){ s.mesh.updateMatrixWorld(true); bbox.expandByObject(s.mesh); } });
+    if(!bbox.isEmpty()){ bbox.getCenter(C); Y_BASE = Math.max(0, bbox.min.y) + 0.04; }
   }
-  // ── Aplicar offset manual del usuario (v2.7) ──────────────────────
-  // Si el usuario ha movido el diagrama con los controles de Posición,
-  // los offsets se suman al centro y a la base. Esto permite reubicar
-  // el diagrama libremente sin perder el comportamiento por defecto.
-  _modelCenter.x += _sunPathOffset.x;
-  _modelCenter.z += _sunPathOffset.z;
-  Y_BASE         += _sunPathOffset.y;
+  C.x += _sunPathOffset.x;
+  C.z += _sunPathOffset.z;
+  Y_BASE += _sunPathOffset.y;
 
-  // ── Función clave: posición 3D sobre esfera — origen en plano base ──
-  // az=0°=Norte, crece CW. THREE.js: +X=Este, +Y=arriba, -Z=Norte
-  function sunPt(alt, az){
+  // az=0°=Norte y crece en sentido horario. En Three.js: +X=Este, −Z=Norte.
+  function sunPt(alt, az, rr){
+    const r = (rr === undefined) ? R : rr;
     const altR = alt * Math.PI / 180;
     const azR  = (az + northAngle) * Math.PI / 180;
     return new THREE.Vector3(
-      _modelCenter.x + Math.cos(altR) * Math.sin(azR) * R,   // Este
-      Y_BASE         + Math.sin(altR) * R,                    // Arriba desde plano base
-      _modelCenter.z - Math.cos(altR) * Math.cos(azR) * R    // Norte
+      C.x + Math.cos(altR) * Math.sin(azR) * r,
+      Y_BASE + Math.sin(altR) * r,
+      C.z - Math.cos(altR) * Math.cos(azR) * r
     );
   }
-
-  // ── Helper: crear línea de puntos ──
-  function makeLine(pts, color, lw){
-    if(pts.length<2) return null;
-    return new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({color, linewidth:lw||1, transparent:true, opacity:0.85})
-    );
+  function sueloPt(az, rr){
+    const azR = (az + northAngle) * Math.PI / 180;
+    return new THREE.Vector3(C.x + Math.sin(azR)*rr, Y_BASE, C.z - Math.cos(azR)*rr);
   }
 
-  // ── 1. Anillo del horizonte centrado en el modelo (Fix 1) ──
-  {
-    const cx=_modelCenter.x, cz=_modelCenter.z;
-    const pts=[];
-    for(let a=0;a<=360;a+=2){
-      const ar=(a+northAngle)*Math.PI/180;
-      pts.push(new THREE.Vector3(cx+Math.sin(ar)*Rg, Y_BASE, cz-Math.cos(ar)*Rg));
-    }
-    const ln=makeLine(pts,0x7090b0,1); if(ln) _sunPathGroup.add(ln);
-
-    // Ticks cada 10° (corto) y 30° (largo)
-    for(let az=0;az<360;az+=10){
-      const ar=(az+northAngle)*Math.PI/180;
-      const rIn= az%30===0 ? Rg*0.88 : Rg*0.94;
-      const p1=new THREE.Vector3(cx+Math.sin(ar)*Rg,    Y_BASE, cz-Math.cos(ar)*Rg);
-      const p2=new THREE.Vector3(cx+Math.sin(ar)*rIn,   Y_BASE, cz-Math.cos(ar)*rIn);
-      const tc=makeLine([p1,p2], az%90===0?0x4488cc:0x8aaabb, 1);
-      if(tc) _sunPathGroup.add(tc);
-    }
-  }
-
-  // ── 2. Radios de azimut centrados en modelo ──
-  for(let az=0;az<360;az+=30){
-    const ar=(az+northAngle)*Math.PI/180;
-    const cx=_modelCenter.x, cz=_modelCenter.z;
-    const pO=new THREE.Vector3(cx,Y_BASE,cz);
-    const pE=new THREE.Vector3(cx+Math.sin(ar)*Rg*0.9,Y_BASE,cz-Math.cos(ar)*Rg*0.9);
-    const ln=makeLine([pO,pE],0x7090b0,1); if(ln) _sunPathGroup.add(ln);
-
-    // Etiqueta de grados en el anillo
-    const canvas2=document.createElement('canvas');
-    canvas2.width=128; canvas2.height=48;
-    const ctx2=canvas2.getContext('2d');
-    ctx2.fillStyle='rgba(40,60,100,0.0)';
-    ctx2.fillRect(0,0,128,48);
-    ctx2.fillStyle='#4488cc';
-    ctx2.font='bold 24px monospace';
-    ctx2.textAlign='center'; ctx2.textBaseline='middle';
-    ctx2.fillText(az+'°',64,24);
-    const tex=new THREE.CanvasTexture(canvas2);
-    const sp2=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
-    const LR=Rg*1.12;
-    sp2.position.set(_modelCenter.x+Math.sin(ar)*LR, Y_BASE+0.3, _modelCenter.z-Math.cos(ar)*LR);
-    sp2.scale.set(2.2,0.8,1);
-    _sunPathGroup.add(sp2);
-  }
-
-  // ── 3. Puntos cardinales (sprites grandes) ──
-  [{az:0,lbl:'N',col:'#ff4444'},{az:90,lbl:'E',col:'#44aaff'},
-   {az:180,lbl:'S',col:'#888'},{az:270,lbl:'O',col:'#44aaff'}]
-  .forEach(({az,lbl,col})=>{
-    const canvas3=document.createElement('canvas');
-    canvas3.width=96; canvas3.height=96;
-    const ctx3=canvas3.getContext('2d');
-    ctx3.fillStyle=col;
-    ctx3.font='bold 56px sans-serif';
-    ctx3.textAlign='center'; ctx3.textBaseline='middle';
-    ctx3.fillText(lbl,48,52);
-    const tex3=new THREE.CanvasTexture(canvas3);
-    const sp3=new THREE.Sprite(new THREE.SpriteMaterial({map:tex3,transparent:true,depthTest:false}));
-    const ar=(az+northAngle)*Math.PI/180;
-    const LR2=Rg*1.22;
-    sp3.position.set(_modelCenter.x+Math.sin(ar)*LR2, Y_BASE+0.5, _modelCenter.z-Math.cos(ar)*LR2);
-    sp3.scale.set(2.8,2.8,1);
-    _sunPathGroup.add(sp3);
-  });
-
-  // ── 4. Anillos de altitud concéntricos (proyección sobre plano) ──
-  for(let alt=15;alt<=75;alt+=15){
-    const altR=alt*Math.PI/180;
-    const rAlt=Math.cos(altR)*R; // proyección horizontal
-    const pts=[];
-    for(let a=0;a<=360;a+=3){
-      const ar=(a+northAngle)*Math.PI/180;
-      pts.push(new THREE.Vector3(_modelCenter.x+Math.sin(ar)*rAlt, Y_BASE+0.01, _modelCenter.z-Math.cos(ar)*rAlt));
-    }
-    const ln=makeLine(pts, alt===45?0x8899cc:0xa8b8cc, 1);
-    if(ln){ ln.material.opacity=0.45; _sunPathGroup.add(ln); }
-
-    // Etiqueta de altitud
-    const cv4=document.createElement('canvas'); cv4.width=80; cv4.height=36;
-    const cx4=cv4.getContext('2d');
-    cx4.fillStyle='#6688aa'; cx4.font='bold 20px monospace';
-    cx4.textAlign='center'; cx4.textBaseline='middle';
-    cx4.fillText(alt+'°',40,18);
-    const sp4=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv4),transparent:true,depthTest:false}));
-    sp4.position.set(_modelCenter.x, Y_BASE+0.3, _modelCenter.z-rAlt);
-    sp4.scale.set(1.4,0.62,1);
-    _sunPathGroup.add(sp4);
-  }
-
-  // ── 5. Trayectorias solares diarias (geometría esférica correcta) ──
-  // Solsticio verano, equinoccios, solsticio invierno + meses intermedios
-  const pathDays=[
-    {d:355,c:0x3388ff,lw:1.5,label:'Sol. Inv.'},
-    {d:47, c:0x44aacc,lw:1},
-    {d:80, c:0x33bb66,lw:2,  label:'Equin.'},
-    {d:135,c:0x88cc33,lw:1},
-    {d:172,c:0xff8800,lw:2.5,label:'Sol. Ver.'},
-    {d:213,c:0xff9900,lw:1},
-    {d:264,c:0x33bb66,lw:2},
-    {d:305,c:0x44aacc,lw:1},
-  ];
-  pathDays.forEach(({d,c,lw,label})=>{
-    const sd0=spSunData(lat,d,12);
-    const pts=[];
-    for(let hr=0;hr<=24;hr+=0.1){
-      const s=spSunData(lat,d,hr);
-      if(s.alt<=0) continue;
-      pts.push(sunPt(s.alt, s.az));
-    }
-    if(pts.length<2) return;
-    const ln=makeLine(pts,c,lw); if(!ln) return;
-    _sunPathGroup.add(ln);
-
-    // Etiqueta de la curva al mediodía solar
-    if(label){
-      const sm=spSunData(lat,d,sd0.solarNoon||12);
-      if(sm.alt>2){
-        const cv5=document.createElement('canvas'); cv5.width=140; cv5.height=40;
-        const cx5=cv5.getContext('2d');
-        cx5.fillStyle='#'+c.toString(16).padStart(6,'0');
-        cx5.font='bold 20px monospace';
-        cx5.textAlign='center'; cx5.textBaseline='middle';
-        cx5.fillText(label,70,20);
-        const sp5=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv5),transparent:true,depthTest:false}));
-        const p5=sunPt(sm.alt+4, sm.az);
-        sp5.position.copy(p5);
-        sp5.scale.set(2.4,0.7,1);
-        _sunPathGroup.add(sp5);
-      }
-    }
-  });
-
-  // ── 6. Trayectoria del día actual (más gruesa, color dorado) ──
-  {
-    const sd0=spSunData(lat,_simDOY,12);
-    const pts=[];
-    for(let hr=0;hr<=24;hr+=0.05){
-      const s=spSunData(lat,_simDOY,hr);
-      if(s.alt<=0) continue;
-      pts.push(sunPt(s.alt,s.az));
-    }
-    const ln=makeLine(pts,0xffdd00,3);
-    if(ln){ ln.material.opacity=1; _sunPathGroup.add(ln); }
-  }
-
-  // ── 7. Líneas horarias (analemmas) cada hora completa ──
-  for(let h=5;h<=19;h++){
-    const pts=[];
-    for(let d=1;d<=365;d+=3){
-      const s=spSunData(lat,d,h);
-      if(s.alt<=0) continue;
-      pts.push(sunPt(s.alt,s.az));
-    }
-    if(pts.length<2) continue;
-    const isMain= h%3===0;
-    const ln=makeLine(pts, isMain?0xccddee:0x889aaa, 1);
-    if(!ln) continue;
-    ln.material.opacity= isMain?0.55:0.3;
-    _sunPathGroup.add(ln);
-
-    // Etiqueta de hora sobre curva de solsticio verano
-    if(isMain){
-      const sv=spSunData(lat,172,h);
-      if(sv.alt>3){
-        const cv6=document.createElement('canvas'); cv6.width=72; cv6.height=36;
-        const cx6=cv6.getContext('2d');
-        cx6.fillStyle='rgba(200,220,255,0.92)';
-        cx6.font='bold 20px monospace';
-        cx6.textAlign='center'; cx6.textBaseline='middle';
-        cx6.fillText(h+'h',36,18);
-        const sp6=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv6),transparent:true,depthTest:false}));
-        sp6.position.copy(sunPt(sv.alt+3,sv.az));
-        sp6.scale.set(1.6,0.8,1);
-        _sunPathGroup.add(sp6);
-      }
-    }
-  }
-
-  // ── 8. Posición actual del sol (esfera + rayo de sombra + sprite de datos) ──
-  {
-    const sc=spSunData(lat,_simDOY,_simHour);
-    if(sc.alt>0){
-      // Esfera solar
-      const sunGeo=new THREE.SphereGeometry(0.55,16,16);
-      const sunMat=new THREE.MeshBasicMaterial({color:0xffee44});
-      const sunMesh=new THREE.Mesh(sunGeo,sunMat);
-      sunMesh.position.copy(sunPt(sc.alt,sc.az));
-      _sunPathGroup.add(sunMesh);
-
-      // Halo (esfera transparente mayor)
-      const haloGeo=new THREE.SphereGeometry(0.9,12,12);
-      const haloMat=new THREE.MeshBasicMaterial({color:0xffcc00,transparent:true,opacity:0.25,side:THREE.FrontSide});
-      const haloMesh=new THREE.Mesh(haloGeo,haloMat);
-      haloMesh.position.copy(sunPt(sc.alt,sc.az));
-      _sunPathGroup.add(haloMesh);
-
-      // Rayo solar: desde el sol hacia el CENTRO DEL MODELO (Fix 2)
-      const sunPos=sunPt(sc.alt,sc.az);
-      const centerPt=new THREE.Vector3(_modelCenter.x, _modelCenter.y, _modelCenter.z);
-      // Rayo completo: sol → centro del modelo
-      const rayFull=makeLine([sunPos, centerPt], 0xffee88, 1.5);
-      if(rayFull){ rayFull.material.opacity=0.7; rayFull.material.transparent=true; _sunPathGroup.add(rayFull); }
-
-      // Proyección vertical del sol al suelo (referencia de azimut)
-      const groundProj=new THREE.Vector3(sunPos.x, Y_BASE, sunPos.z);
-      const rayVertical=makeLine([centerPt.clone().setY(Y_BASE), groundProj], 0xffcc00, 1);
-      if(rayVertical){ rayVertical.material.opacity=0.35; rayVertical.material.transparent=true; _sunPathGroup.add(rayVertical); }
-
-      // Cruz en el suelo en la proyección del sol
-      const cs=0.6;
-      const crossPts1=[new THREE.Vector3(groundProj.x-cs,Y_BASE+0.05,groundProj.z),
-                       new THREE.Vector3(groundProj.x+cs,Y_BASE+0.05,groundProj.z)];
-      const crossPts2=[new THREE.Vector3(groundProj.x,Y_BASE+0.05,groundProj.z-cs),
-                       new THREE.Vector3(groundProj.x,Y_BASE+0.05,groundProj.z+cs)];
-      [crossPts1,crossPts2].forEach(cp=>{
-        const cl=makeLine(cp,0xffcc00,1); if(cl) _sunPathGroup.add(cl);
-      });
-
-      // Círculo de incidencia en el centro del modelo
-      const cR=0.8;
-      const cPts=[];
-      for(let a=0;a<=360;a+=10){
-        const ar=a*Math.PI/180;
-        cPts.push(new THREE.Vector3(_modelCenter.x+Math.cos(ar)*cR, _modelCenter.y+Y_BASE+0.05, _modelCenter.z+Math.sin(ar)*cR));
-      }
-      const cCircle=makeLine(cPts,0xffee44,1);
-      if(cCircle){ cCircle.material.opacity=0.7; _sunPathGroup.add(cCircle); }
-
-      // Sprite con datos del sol
-      const cv7=document.createElement('canvas'); cv7.width=256; cv7.height=80;
-      const cx7=cv7.getContext('2d');
-      cx7.fillStyle='rgba(20,30,50,0.82)';
-      cx7.roundRect ? cx7.roundRect(2,2,252,76,8) : cx7.fillRect(2,2,252,76);
-      cx7.fill();
-      cx7.fillStyle='#ffee44'; cx7.font='bold 22px monospace';
-      cx7.textAlign='left'; cx7.textBaseline='top';
-      cx7.fillText('Alt: '+sc.alt.toFixed(1)+'°',10,6);
-      cx7.fillStyle='#88ccff';
-      cx7.fillText('Az: '+sc.az.toFixed(1)+'°',10,32);
-      cx7.fillStyle='#aaddaa';
-      cx7.font='16px monospace';
-      cx7.fillText(spFmtH(_simHour)+' · '+spMonthName(_simDOY),10,58);
-      const sp7=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv7),transparent:true,depthTest:false}));
-      const infoPos=sunPt(sc.alt+6, sc.az);
-      sp7.position.copy(infoPos);
-      sp7.scale.set(4.8,1.5,1);
-      _sunPathGroup.add(sp7);
+  // ── Utilidades de dibujo ────────────────────────────────────────────
+  function linea(pts, color, opacity, dash){
+    if(!pts || pts.length < 2) return null;
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    let mat, ln;
+    if(dash){
+      mat = new THREE.LineDashedMaterial({ color, transparent:true,
+        opacity: opacity === undefined ? 1 : opacity,
+        dashSize: dash.dash, gapSize: dash.gap });
+      ln = new THREE.Line(geo, mat);
+      ln.computeLineDistances();
     } else {
-      // Noche: indicador simple
-      const cv8=document.createElement('canvas'); cv8.width=120; cv8.height=40;
-      const cx8=cv8.getContext('2d');
-      cx8.fillStyle='rgba(120,140,200,0.8)'; cx8.font='bold 22px monospace';
-      cx8.textAlign='center'; cx8.textBaseline='middle';
-      cx8.fillText('🌙 Noche',60,20);
-      const sp8=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv8),transparent:true,depthTest:false}));
-      sp8.position.set(0,R*0.25,0);
-      sp8.scale.set(3.5,1.2,1);
-      _sunPathGroup.add(sp8);
+      mat = new THREE.LineBasicMaterial({ color, transparent:true,
+        opacity: opacity === undefined ? 1 : opacity });
+      ln = new THREE.Line(geo, mat);
+    }
+    G.add(ln);
+    return ln;
+  }
+  function anillo(r1, r2, color, opacity){
+    const m = new THREE.Mesh(
+      new THREE.RingGeometry(r1, r2, 192),
+      new THREE.MeshBasicMaterial({ color, transparent:true, opacity,
+                                    side: THREE.DoubleSide, depthWrite:false }));
+    m.rotation.x = -Math.PI/2;
+    m.position.set(C.x, Y_BASE + 0.012, C.z);
+    m.renderOrder = 3;
+    G.add(m);
+    return m;
+  }
+  function rotulo(txt, pos, opts, escala){
+    const t = _spTexto(txt, opts);
+    t.sprite.position.copy(pos);
+    const k = (escala === undefined ? 1 : escala) * R * 0.0016;
+    t.sprite.scale.set(t.w * k, t.h * k, 1);
+    G.add(t.sprite);
+    return t.sprite;
+  }
+
+  // ── 1. Brújula graduada ─────────────────────────────────────────────
+  anillo(Rg * 0.997, Rg * 1.004, SP_AMBAR, 0.95);
+  anillo(Rg * 1.056, Rg * 1.061, SP_AMBAR, 0.6);
+  {
+    // Graduación a 1°, con tres longitudes: 1°, 5° y 10°.
+    const pts = [];
+    for(let a = 0; a < 360; a++){
+      const rOut = (a % 10 === 0) ? 1.056 : (a % 5 === 0 ? 1.034 : 1.017);
+      pts.push(sueloPt(a, Rg * 1.004), sueloPt(a, Rg * rOut));
+    }
+    const ln = new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: SP_AMBAR, transparent:true, opacity:0.75 }));
+    G.add(ln);
+  }
+  // Grados cada 30°, saltando los cardinales (que llevan letra)
+  for(let a = 30; a < 360; a += 30){
+    if(a % 90 === 0) continue;
+    rotulo(a + '°', sueloPt(a, Rg * 1.105).setY(Y_BASE + 0.25),
+           { color: SP_TXT, font: 'bold 34px ui-monospace, monospace' }, 0.85);
+  }
+  // Cardinales; el norte en rojo, como en la app de análisis de sitio
+  [['N',0,SP_NORTE],['E',90,SP_AMBAR],['S',180,SP_AMBAR],['O',270,SP_AMBAR]]
+  .forEach(([lbl, az, col]) => {
+    rotulo(lbl, sueloPt(az, Rg * 1.145).setY(Y_BASE + 0.4),
+           { color: '#' + col.toString(16).padStart(6,'0'),
+             font: 'bold 64px system-ui, sans-serif' }, 1.15);
+  });
+  // Flecha de norte
+  {
+    const sh = new THREE.Shape();
+    const k = Rg;
+    sh.moveTo(0, k*1.245); sh.lineTo(k*0.024, k*1.175);
+    sh.lineTo(0, k*1.196); sh.lineTo(-k*0.024, k*1.175);
+    sh.closePath();
+    const m = new THREE.Mesh(new THREE.ShapeGeometry(sh),
+      new THREE.MeshBasicMaterial({ color: SP_NORTE, side: THREE.DoubleSide,
+                                    transparent:true, depthWrite:false }));
+    m.rotation.x = -Math.PI/2;
+    // Signo negativo: con el orden de Euler XYZ el giro en el plano se
+    // aplica ANTES de tumbar la forma, y sin el signo la flecha apunta al
+    // lado contrario en cuanto el norte del proyecto deja de ser 0°.
+    m.rotation.z = -northAngle * Math.PI/180;
+    m.position.set(C.x, Y_BASE + 0.05, C.z);
+    m.renderOrder = 4;
+    G.add(m);
+  }
+  // Cruz en el centro
+  {
+    const c = R * 0.028;
+    linea([new THREE.Vector3(C.x-c, Y_BASE+0.03, C.z), new THREE.Vector3(C.x+c, Y_BASE+0.03, C.z)], SP_AMBAR, 0.9);
+    linea([new THREE.Vector3(C.x, Y_BASE+0.03, C.z-c), new THREE.Vector3(C.x, Y_BASE+0.03, C.z+c)], SP_AMBAR, 0.9);
+  }
+
+  // ── 2. Anillos de altitud ───────────────────────────────────────────
+  // No están en la app de referencia, pero en una herramienta de análisis
+  // sirven para leer la altura solar sobre el propio diagrama. Se dejan,
+  // discretos y dentro de la misma familia de color.
+  if(_spAnillosAlt){
+    for(let alt = 15; alt <= 75; alt += 15){
+      const rAlt = Math.cos(alt * Math.PI/180) * R;
+      const pts = [];
+      for(let a = 0; a <= 360; a += 3) pts.push(sueloPt(a, rAlt).setY(Y_BASE + 0.008));
+      linea(pts, SP_AMBAR_S, 0.3, { dash: R*0.012, gap: R*0.016 });
+      if(_spEtiquetas)
+        rotulo(alt + '°', sueloPt(180, rAlt).setY(Y_BASE + 0.2),
+               { color: '#9a7b3a', font: 'bold 28px ui-monospace, monospace' }, 0.62);
     }
   }
 
-  // ── 9. Eje vertical (cenit) ──
-  {
-    const zAxis=makeLine([new THREE.Vector3(_modelCenter.x,Y_BASE,_modelCenter.z),new THREE.Vector3(_modelCenter.x,_modelCenter.y+R,_modelCenter.z)],0xccddee,1);
-    if(zAxis){ zAxis.material.opacity=0.3; _sunPathGroup.add(zAxis); }
-    // Punto cenit
-    const zG=new THREE.SphereGeometry(0.15,8,8);
-    const zM=new THREE.MeshBasicMaterial({color:0xbbccdd,transparent:true,opacity:0.6});
-    const zMesh=new THREE.Mesh(zG,zM);
-    zMesh.position.set(_modelCenter.x,_modelCenter.y+R,_modelCenter.z);
-    _sunPathGroup.add(zMesh);
-    // Etiqueta cenit
-    const cv9=document.createElement('canvas'); cv9.width=96; cv9.height=36;
-    const cx9=cv9.getContext('2d');
-    cx9.fillStyle='rgba(180,200,220,0.8)'; cx9.font='14px monospace';
-    cx9.textAlign='center'; cx9.textBaseline='middle';
-    cx9.fillText('CENIT',48,18);
-    const sp9=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv9),transparent:true,depthTest:false}));
-    sp9.position.set(_modelCenter.x,_modelCenter.y+R+1.5,_modelCenter.z);
-    sp9.scale.set(2.2,0.8,1);
-    _sunPathGroup.add(sp9);
+  // ── 3. Banda solar anual ────────────────────────────────────────────
+  // Superficie que barre el sol entre los dos solsticios. Es el elemento
+  // que da sentido al conjunto de un vistazo: todo lo que queda dentro de
+  // la banda recibe sol en algún momento del año; lo de fuera, nunca.
+  if(_spBanda){
+    const DEC = 23.44 * Math.PI/180;
+    const ND = 24, NH = 144;
+    const pos = [], idx = [], alts = [];
+    for(let i = 0; i <= ND; i++){
+      const declR = -DEC + 2*DEC*i/ND;
+      for(let j = 0; j <= NH; j++){
+        const haR = (-180 + 360*j/NH) * Math.PI/180;
+        const p = _spAltAz(latR, declR, haR);
+        const v = sunPt(Math.max(0, p.alt), p.az);
+        pos.push(v.x, v.y + 0.05, v.z);
+        alts.push(p.alt);
+      }
+    }
+    const fila = NH + 1;
+    for(let i = 0; i < ND; i++){
+      for(let j = 0; j < NH; j++){
+        const a0 = i*fila + j, a1 = a0+1, b0 = a0+fila, b1 = b0+1;
+        if(alts[a0] > 0 || alts[a1] > 0 || alts[b0] > 0) idx.push(a0, b0, a1);
+        if(alts[a1] > 0 || alts[b1] > 0 || alts[b0] > 0) idx.push(a1, b0, b1);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: SP_BANDA, transparent:true, opacity:0.17,
+      side: THREE.DoubleSide, depthWrite:false }));
+    mesh.renderOrder = 2;
+    G.add(mesh);
   }
 
-  scene.add(_sunPathGroup);
+  // ── 4. Analemas horarios ────────────────────────────────────────────
+  // El ocho que describe el sol a la misma hora a lo largo del año.
+  if(_spAnalemas){
+    for(let h = 0; h < 24; h++){
+      const muestras = [];
+      for(let d = 1; d <= 366; d += 3) muestras.push(spSunData(lat, Math.min(d, 365), h));
+      if(!muestras.some(p => p.alt > 0)) continue;
+      const cerrado = muestras.concat(muestras.slice(0, 1));
+      for(const tramo of _spTramos(cerrado))
+        if(tramo.length > 1)
+          linea(tramo.map(p => sunPt(p.alt, p.az)), SP_AMBAR_S, 0.42);
+    }
+  }
+
+  // ── 5. Trayectorias del día 21 de cada mes elegido ──────────────────
+  const marcas = [];
+  _spMeses.forEach(mes => {
+    const doy = _spDoyDia21(mes);
+    const solsticio = (mes === 6 || mes === 12);
+    const muestras = [];
+    for(let k = 0; k <= 24*12; k++) muestras.push(spSunData(lat, doy, k/12));
+    for(const tramo of _spTramos(muestras)){
+      if(tramo.length < 2) continue;
+      linea(tramo.map(p => sunPt(p.alt, p.az)),
+            solsticio ? SP_AMBAR : SP_AMBAR_S,
+            solsticio ? 0.95 : 0.8,
+            solsticio ? null : { dash: R*0.014, gap: R*0.011 });
+    }
+    // Marcador y numeral en cada hora en punto
+    let cumbre = null;
+    for(let h = 0; h < 24; h++){
+      const p = spSunData(lat, doy, h);
+      if(p.alt <= 0.5) continue;
+      marcas.push(sunPt(p.alt, p.az));
+      if(_spEtiquetas){
+        const pos = sunPt(p.alt, p.az, R * 1.058);
+        pos.y += R * 0.014;
+        rotulo(String(h), pos, { color: SP_TXT, font: 'bold 40px ui-monospace, monospace' }, 0.72);
+      }
+      if(!cumbre || p.alt > cumbre.alt) cumbre = p;
+    }
+    // Pastilla con el día, sobre el punto más alto de la trayectoria
+    if(cumbre && _spEtiquetas){
+      // Por encima del numeral de la hora de cumbre, que vive en R·1.058:
+      // si la pastilla se coloca al mismo radio se solapan.
+      const pos = sunPt(cumbre.alt, cumbre.az, R * 1.058);
+      pos.y += R * 0.105;
+      rotulo('21 ' + _SP_MES3[mes-1], pos,
+             { color: '#2a1c00', bg: '#e8bb4e', pad: 9,
+               font: 'bold 44px system-ui, sans-serif' }, 0.78);
+    }
+  });
+  if(marcas.length){
+    const inst = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(R * 0.0092, 12, 8),
+      new THREE.MeshBasicMaterial({ color: SP_AMBAR }), marcas.length);
+    const M = new THREE.Matrix4();
+    marcas.forEach((p, i) => { M.makeTranslation(p.x, p.y, p.z); inst.setMatrixAt(i, M); });
+    inst.renderOrder = 6;
+    G.add(inst);
+  }
+
+  // ── 6. Trayectoria del día seleccionado ─────────────────────────────
+  {
+    const muestras = [];
+    for(let k = 0; k <= 24*12; k++) muestras.push(spSunData(lat, _simDOY, k/12));
+    for(const tramo of _spTramos(muestras))
+      if(tramo.length > 1)
+        linea(tramo.map(p => sunPt(p.alt, p.az)), SP_SOL, 0.9,
+              { dash: R*0.018, gap: R*0.012 });
+  }
+
+  // ── 7. Posición actual del sol ──────────────────────────────────────
+  {
+    const sc = spSunData(lat, _simDOY, _simHour);
+    if(sc.alt > -2){
+      const p = sunPt(sc.alt, sc.az);
+      const sol = new THREE.Mesh(new THREE.SphereGeometry(R*0.023, 24, 16),
+                                 new THREE.MeshBasicMaterial({ color: SP_SOL }));
+      sol.position.copy(p); sol.renderOrder = 8;
+      G.add(sol);
+      // Halo: esfera mayor translúcida (equivalente barato del sprite
+      // aditivo de la app de referencia, sin textura que empaquetar).
+      const halo = new THREE.Mesh(new THREE.SphereGeometry(R*0.055, 16, 12),
+        new THREE.MeshBasicMaterial({ color: SP_SOL, transparent:true,
+                                      opacity:0.22, depthWrite:false }));
+      halo.position.copy(p); halo.renderOrder = 7;
+      G.add(halo);
+      if(sc.alt > 0){
+        // Rayo punteado hasta el centro del modelo
+        linea([p, new THREE.Vector3(C.x, Y_BASE + R*0.03, C.z)], SP_SOL, 0.75,
+              { dash: R*0.022, gap: R*0.016 });
+        // Azimut sobre el plano del suelo
+        linea([new THREE.Vector3(C.x, Y_BASE + 0.02, C.z), sueloPt(sc.az, Rg).setY(Y_BASE + 0.02)],
+              SP_SOL, 0.4, { dash: R*0.022, gap: R*0.016 });
+      }
+    } else if(_spEtiquetas){
+      rotulo('Noche', new THREE.Vector3(C.x, Y_BASE + R*0.28, C.z),
+             { color: '#44506a', bg: 'rgba(230,236,246,0.9)', pad: 8,
+               font: 'bold 40px system-ui, sans-serif' }, 1);
+    }
+  }
+
+  // ── 8. Eje de cenit ─────────────────────────────────────────────────
+  linea([new THREE.Vector3(C.x, Y_BASE, C.z), new THREE.Vector3(C.x, Y_BASE + R, C.z)],
+        SP_AMBAR_S, 0.22, { dash: R*0.02, gap: R*0.02 });
+
+  scene.add(G);
 }
+
+// Conmutadores del diagrama, desde el panel SOLAR.
+function setSunPathOpt(clave, valor){
+  if(clave === 'banda')      _spBanda = !!valor;
+  else if(clave === 'anal')  _spAnalemas = !!valor;
+  else if(clave === 'etiq')  _spEtiquetas = !!valor;
+  else if(clave === 'alt')   _spAnillosAlt = !!valor;
+  if(_sunPathVisible) renderSunPath();
+}
+
 function toggleSunPath(){
   _sunPathVisible=!_sunPathVisible;
   const btn=document.getElementById('bSUN');
@@ -18113,13 +18216,50 @@ let _shadowCacheDirty = true;  // rebuild needed flag
 let _shadowCacheKey = '';      // JSON of surface ids+positions to detect changes
 
 // Mark dirty whenever geometry changes — also updates UI indicator
+// ── Estado del caché de vista al cielo ───────────────────────────────
+// Declarado AQUÍ, por encima de invalidateShadowCache(), y no junto al
+// resto del módulo de vista al cielo: esa función lo toca y en JavaScript
+// un `let` no está disponible antes de su línea de declaración ni
+// siquiera para `typeof` (zona muerta temporal). Con las declaraciones
+// más abajo, cualquier invalidación disparada durante el arranque —un
+// autoguardado restaurado, por ejemplo— lanzaría ReferenceError.
+let _svfCache = null;        // Map<surfId, {sky, gnd, skyOpen, gndOpen}>
+let _svfCacheDirty = true;
+let _svfGen = 0;             // generación del caché, para invalidar memos
+let _svfFallos = 0;          // superficies que han caído al hemisferio despejado
+
 function invalidateShadowCache(){
   _nivelBajoModelo = null;   // v11.7: la cota más baja puede haber cambiado
   _shadowCacheDirty=true;
   _snapCacheDirty=true; // snap cache siempre se invalida junto con sombras
+
+  // ── v12.8: la vista al cielo se invalida SIEMPRE con las sombras ─────
+  // Los dos cachés dependen de lo mismo —el BVH de la geometría que
+  // proyecta— y no existe cambio geométrico que invalide uno y no el otro.
+  // Hasta la v12.7 eran listas separadas, y la del SVF era un subconjunto
+  // estricto: invalidateShadowCache() se llamaba desde 32 sitios y
+  // invalidateSVFCache() solo desde 9. Quedaban fuera, entre otros,
+  // registrar() (importar geometría), ctxDelete() (borrar), crearCaja(),
+  // confirmarExtrusión(), finishPoly(), _itCommit() (mover, rotar,
+  // escalar), _nodOnMouseDown() (editar vértices), _restoreState()
+  // (deshacer) y limpiarEscena(). Tras cualquiera de esas operaciones el
+  // factor de vista al cielo seguía siendo el de la geometría anterior:
+  // se podía borrar el alero que daba sombra a una ventana y la ventana
+  // seguía calculándose como si el alero estuviera ahí.
+  //
+  // Encadenarlo aquí cierra las veinticuatro brechas de golpe y, lo que
+  // importa más, las futuras: la convención del código es que toda
+  // mutación geométrica llama a invalidateShadowCache(), así que una
+  // operación nueva hereda la invalidación del SVF sin que nadie tenga
+  // que acordarse. El coste de rehacerlo es pequeño frente al de las
+  // sombras (medido: 0,1 s para 256 superficies y 0,4 s para 618, frente
+  // a 4,3 s y 16 s del caché de sombras).
+  _svfCacheDirty = true;
+  _svfGen++;
+
   // Actualizar indicador UI inmediatamente si existe
   const el=document.getElementById('shadowCacheStat');
-  if(el) el.innerHTML='Sombras: <span style="color:var(--warn)">⚠ pendiente — se recalculará al simular</span>';
+  if(el) el.innerHTML='Sombras y vista al cielo: <span style="color:var(--warn)">⚠ pendiente — se recalcularán al simular</span>';
   // v3.9: cualquier cambio geométrico invoca _refreshViewMode para que las
   // superficies nuevas (creación interactiva, paste, extrude, etc.) hereden
   // las aristas del modo actual. Llamada idempotente y barata.
@@ -18361,6 +18501,132 @@ function perezDifusa(DHI, ph, cosB, cosInc, vfCielo, sf){
   const circ = ph.F1 * Math.max(0, cosInc) / ph.cosThzLim * Math.max(0, Math.min(1, sf));
   const hor  = ph.F2 * sinB * obstr;
   return Math.max(0, DHI * (iso + circ + hor));
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  v12.8 — TRANSMITANCIA ANGULAR DEL VIDRIO (Fresnel + Bouguer)
+//
+//  El SHGC de catálogo se mide a INCIDENCIA NORMAL. Un vidrio que recibe
+//  el sol a 70° transmite bastante menos: parte del haz se refleja en las
+//  dos caras y el recorrido dentro del vidrio se alarga. Mientras el
+//  balance usaba el factor plano 0,5 el error quedaba enmascarado; al
+//  proyectar el haz correctamente (v12.8) hay que corregirlo o se
+//  sobreestima la ganancia en fachadas oriente y occidente, donde el sol
+//  entra muy oblicuo buena parte del año.
+//
+//  Se calcula desde la física en vez de con un polinomio ajustado:
+//    · Fresnel para las dos polarizaciones (n = 1,526, vidrio sodocálcico)
+//    · Absorción de Bouguer-Lambert a lo largo del camino real
+//    · Reflexiones internas múltiples (serie geométrica cerrada)
+//  y se devuelve NORMALIZADO, τ(θ)/τ(0), para poder multiplicarlo por el
+//  SHGC de catálogo sea cual sea el vidrio.
+//
+//  Para vidrios múltiples (DVH, TVH) se aplica la misma curva relativa:
+//  la forma angular apenas cambia con el número de hojas, lo que cambia
+//  es el nivel, y el nivel ya lo fija el SHGC de catálogo. Es una
+//  aproximación y está declarada como tal en «Acerca de».
+// ══════════════════════════════════════════════════════════════════════
+const _N_VIDRIO = 1.526;        // índice de refracción, vidrio sodocálcico
+const _KL_VIDRIO = 0.156;       // coef. extinción × espesor (float claro 6 mm)
+
+function _tauVidrioAbs(cosInc){
+  // Transmitancia absoluta de una hoja, promedio de las dos polarizaciones.
+  const ci = Math.max(0, Math.min(1, cosInc));
+  const th1 = Math.acos(ci);
+  const s2  = Math.sin(th1) / _N_VIDRIO;
+  if(s2 >= 1) return 0;                       // reflexión total (no ocurre al entrar)
+  const th2 = Math.asin(s2);
+  const ct2 = Math.cos(th2);
+  if(ct2 <= 1e-9) return 0;
+  // Absorción a lo largo del camino oblicuo dentro del vidrio
+  const tauA = Math.exp(-_KL_VIDRIO / ct2);
+  let rPer, rPar;
+  if(th1 < 1e-6){
+    // Incidencia normal: las fórmulas con senos y tangentes se indeterminan
+    const r0 = Math.pow((_N_VIDRIO - 1) / (_N_VIDRIO + 1), 2);
+    rPer = rPar = r0;
+  } else {
+    const sm = Math.sin(th2 - th1), sp = Math.sin(th2 + th1);
+    const tm = Math.tan(th2 - th1), tp = Math.tan(th2 + th1);
+    rPer = sp !== 0 ? Math.pow(sm / sp, 2) : 1;
+    rPar = isFinite(tp) && tp !== 0 ? Math.pow(tm / tp, 2) : 1;
+  }
+  const una = (r) => {
+    const rr = Math.max(0, Math.min(0.999999, r));
+    const den = 1 - Math.pow(rr * tauA, 2);
+    return den > 1e-9 ? tauA * Math.pow(1 - rr, 2) / den : 0;
+  };
+  return 0.5 * (una(rPer) + una(rPar));
+}
+
+const _TAU_VIDRIO_0 = _tauVidrioAbs(1);   // referencia a incidencia normal
+
+function tauRelVidrio(cosInc){
+  if(!(cosInc > 0)) return 0;
+  if(_TAU_VIDRIO_0 <= 0) return 1;
+  return Math.max(0, Math.min(1, _tauVidrioAbs(cosInc) / _TAU_VIDRIO_0));
+}
+
+// Factor único para la difusa y la reflejada: promedio hemisférico
+// ponderado por el coseno,  2·∫ τrel(θ)·cosθ·senθ dθ  sobre 0..90°.
+// Es el tratamiento estándar cuando no se integra la bóveda parche a
+// parche: equivale a un ángulo de incidencia efectivo de ~58°.
+const _TAU_VIDRIO_DIF = (function(){
+  const N = 900; let acc = 0;
+  for(let i = 0; i < N; i++){
+    const th = (i + 0.5) * (Math.PI / 2) / N;
+    acc += tauRelVidrio(Math.cos(th)) * Math.cos(th) * Math.sin(th);
+  }
+  return 2 * acc * (Math.PI / 2) / N;
+})();
+
+// Autoprueba: la curva debe reproducir los valores publicados para vidrio
+// claro sencillo (τrel ≈ 0,97 a 40°, ≈ 0,88 a 60°, ≈ 0,45 a 80°, 0 a 90°)
+// y ser monótona decreciente. Si alguien toca n o KL, esto lo delata.
+function _tauVidrioAutoPrueba(){
+  // Valores publicados para vidrio claro sencillo (ASHRAE HOF, cap. 15).
+  // Tolerancia de contraste: 0,02 en τ relativa.
+  const esperado = [[0,1.000],[40,0.970],[60,0.885],[70,0.750],[80,0.450],[90,0.000]];
+  let peor = 0, detalle = [];
+  for(const [gr, ref] of esperado){
+    const v = tauRelVidrio(Math.cos(gr * Math.PI / 180));
+    peor = Math.max(peor, Math.abs(v - ref));
+    detalle.push(gr + '°=' + v.toFixed(3));
+  }
+  let monotona = true, prev = 1.0001;
+  for(let g = 0; g <= 90; g += 2){
+    const v = tauRelVidrio(Math.cos(g * Math.PI / 180));
+    if(v > prev + 1e-9){ monotona = false; break; }
+    prev = v;
+  }
+  return { peor, monotona, difuso: _TAU_VIDRIO_DIF, detalle: detalle.join(' · ') };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  v12.8 — IRRADIANCIA INCIDENTE: UNA SOLA IMPLEMENTACIÓN
+//
+//  Hasta la v12.7 había dos. El módulo de radiación proyectaba el haz,
+//  medía la vista al cielo con trazado de rayos y sumaba la reflejada del
+//  terreno; el balance térmico usaba (DNI·sf + DHI)·0,5, que ignora la
+//  orientación, la obstrucción del cielo y la reflejada por completo.
+//  Las dos daban números distintos para la misma superficie y la misma
+//  hora, y la diferencia cambiaba de signo según la geometría.
+//
+//  Ahora las dos rutas llaman aquí. Si esta función cambia, cambian las
+//  dos a la vez, que era el objetivo.
+//
+//  sg  debe traer: normal (Vector3 en mundo), skyVF, gndVF
+//  ph  coeficientes de Perez de la hora, o null para cielo isótropo
+//  sf  factor de sombra 0..1 del caché de rayos
+// ══════════════════════════════════════════════════════════════════════
+function irradianciaSup(sg, DNI, DHI, GHI, sunDir, ph, sf, rho){
+  const cosInc = sg.normal.dot(sunDir);
+  const dir = cosInc > 0 ? DNI * cosInc * sf : 0;
+  const dif = ph
+    ? perezDifusa(DHI, ph, sg.normal.y, cosInc, sg.skyVF, sf)
+    : DHI * sg.skyVF;
+  const ref = GHI * rho * sg.gndVF;
+  return { dir, dif, ref, cosInc };
 }
 
 // ── Prueba de contraste ───────────────────────────────────────────────
@@ -18659,10 +18925,116 @@ function _gndPatches(){
 // construir el caché de sombras y reutilizada por el factor de vista al cielo.
 let _obstrComplexity = null;
 
-let _svfCache = null;        // Map<surfId, {sky, gnd, skyOpen, gndOpen}>
-let _svfCacheDirty = true;
+function invalidateSVFCache(){ _svfCacheDirty = true; _svfGen++; }
 
-function invalidateSVFCache(){ _svfCacheDirty = true; }
+// Cuántas superficies han tenido que usar el hemisferio despejado por no
+// estar en el caché. Debe quedar en cero: si no, el rótulo lo dice.
+function resetVistaCieloFallos(){ _svfFallos = 0; }
+
+// ══════════════════════════════════════════════════════════════════════
+//  v12.8 — GARANTIZAR COBERTURA DEL CACHÉ DE VISTA AL CIELO
+//
+//  FALLO CORREGIDO (presente al menos desde la v7.3). El caché se construía
+//  únicamente para la selección del momento, pero el consumidor hacía
+//
+//      const svf = (usarSVF && _svfCache) ? _svfCache.get(s.id) : null;
+//      const skyVF = svf ? svf.sky : (1 + cosB)/2;
+//
+//  de modo que una superficie AUSENTE del caché no provocaba un recálculo:
+//  caía al hemisferio despejado en silencio. Y como _svfCacheDirty solo se
+//  marca cuando cambia la geometría, bastaba con calcular una vez con una
+//  selección y volver a calcular con otra para que las superficies nuevas
+//  salieran como si no tuvieran nada delante — mientras el informe seguía
+//  declarando «vista al cielo medida».
+//
+//  El efecto no era pequeño. En el modelo AULA-OP2 del usuario la ventana
+//  reportaba 726 kWh/m² (difusa 448 = DHI×0,5 exacto, reflejada 215 =
+//  GHI×ρ×0,5 exacto) cuando su valor medido es 238 kWh/m² (difusa 124,
+//  reflejada 52, vista al cielo 0,138). Un factor de 3, y justamente en la
+//  comparación entre dos alternativas de fachada.
+// ══════════════════════════════════════════════════════════════════════
+async function asegurarVistaCielo(surfList, onProgress){
+  if(_svfCacheDirty || !_svfCache){
+    await buildSkyViewFactors(surfList, onProgress);
+    return { modo:'completo', n:surfList.length };
+  }
+  const faltan = surfList.filter(s => !_svfCache.has(s.id));
+  if(!faltan.length) return { modo:'vigente', n:0 };
+  await buildSkyViewFactors(faltan, onProgress, true);
+  return { modo:'ampliado', n:faltan.length };
+}
+
+// ── v12.8: ajustes solares compartidos entre radiación y balance ──────
+// Se leen del DOM UNA vez por simulación y se guardan aquí. Antes el
+// módulo de radiación los leía en su propio bucle y el balance térmico
+// ni siquiera los conocía; ahora los dos miran el mismo sitio.
+let _solarDetallado = true;   // v12.8: irradiancia por trazado de rayos en el balance
+let _rhoSuelo       = 0.2;    // albedo del terreno
+let _perezBalance   = false;  // cielo anisótropo también en el balance
+let _usarVistaCielo = true;   // medir la obstrucción del cielo con rayos
+const _SOL_BAJO = (typeof THREE !== 'undefined')
+                  ? new THREE.Vector3(0, -1, 0) : {x:0, y:-1, z:0};
+
+function albedoProyecto(){
+  const v = parseFloat(document.getElementById('radAlbedo')?.value ?? 0.2);
+  return Math.max(0, Math.min(1, isFinite(v) ? v : 0.2));
+}
+
+// Refresca los ajustes solares desde la interfaz. Llamarla al principio de
+// cada simulación y de cada cálculo de radiación, nunca dentro del bucle
+// horario (es una lectura del DOM).
+function refrescarAjustesSolares(){
+  _rhoSuelo = albedoProyecto();
+  const chk = document.getElementById('balSolarDetalle');
+  _solarDetallado = chk ? chk.checked !== false : true;
+  _usarVistaCielo = document.getElementById('radUseSVF')?.checked !== false;
+  const pedido = document.getElementById('radPerez')?.checked === true;
+  _perezBalance = pedido && _perezAutoPrueba(false).peorAlto < 1e-6;
+  return { detallado:_solarDetallado, rho:_rhoSuelo,
+           perez:_perezBalance, vistaCielo:_usarVistaCielo };
+}
+
+// Factores de vista al cielo y al terreno de una superficie, memoizados
+// sobre el propio registro de geometría. Si el caché medido existe se usa;
+// si no, los valores analíticos del hemisferio despejado.
+function _vfSup(sg, s){
+  if(sg._vfGen === _svfGen) return sg;
+  const ny = isFinite(sg.ny) ? sg.ny : 0;
+  const esPiso = sg.isFloor || ny < -0.3;
+  const v = (_usarVistaCielo && _svfCache && !_svfCacheDirty) ? _svfCache.get(s.id) : null;
+  if(_usarVistaCielo && !v && !esPiso) _svfFallos++;
+  sg.skyVF = esPiso ? 0 : (v ? v.sky : (1 + ny) / 2);
+  sg.gndVF = esPiso ? 0 : (v ? v.gnd : (1 - ny) / 2);
+  sg.vfMedido = !!v;
+  sg._vfGen = _svfGen;
+  return sg;
+}
+
+// Contexto solar de una hora del año: dirección del sol, GHI y, si está
+// activo, los coeficientes de Perez. Devuelve null si no hay radiación.
+// La convención de hora (doy = floor(h/24)+1, hora = h%24 + 0.5) es
+// exactamente la del caché de sombras, para que el factor de sombra que
+// se lee en esa misma hora corresponda a esta posición del sol.
+function contextoSolarHora(h, DNI, DHI){
+  if(!(DNI + DHI >= 1)) return null;
+  const doy = (Math.floor(h / 24) % 365) + 1;
+  const hod = (h % 24) + 0.5;
+  const sd  = spSunData(_latitude, doy, hod);
+  const alto = sd.alt > 0.5;
+  if(!alto){
+    // Crepúsculo: sin haz directo, pero la difusa del cielo sigue entrando.
+    return { dir:_SOL_BAJO, GHI:DHI, ph:null, rho:_rhoSuelo, alt:sd.alt };
+  }
+  const sinA = Math.sin(sd.alt * Math.PI / 180);
+  return {
+    dir: sunVector(sd.alt, sd.az + northAngle),
+    GHI: DNI * sinA + DHI,
+    ph : (_perezBalance && DHI > 0)
+         ? perezHora(DNI, DHI, (90 - sd.alt) * Math.PI / 180, doy) : null,
+    rho: _rhoSuelo,
+    alt: sd.alt
+  };
+}
 
 // Integra un hemisferio de parches y devuelve la FRACCIÓN DESPEJADA:
 //   0 = totalmente tapado, 1 = totalmente despejado.
@@ -18689,8 +19061,12 @@ function _integrateHemisphere(patches, origins, normal, surfId, bvh){
 }
 
 // Calcula SVF y factor de vista al suelo para las superficies indicadas.
-async function buildSkyViewFactors(surfList, onProgress){
-  _svfCache = new Map();
+async function buildSkyViewFactors(surfList, onProgress, anexar){
+  // v12.8 — anexar=true conserva lo ya medido y solo añade lo que falta.
+  // Antes esta función SIEMPRE empezaba con un mapa vacío, de modo que el
+  // caché quedaba limitado a la última selección calculada. Ver
+  // asegurarVistaCielo() para el porqué.
+  if(!(anexar && _svfCache)) _svfCache = new Map();
   _svfCacheDirty = false;
 
   const shaderZoneIds = new Set(zones.filter(z=>z.shader||z.thermal).map(z=>z.id));
@@ -19206,20 +19582,47 @@ function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rh
       const _sfArr = shadowFactors ? shadowFactors.get(s.id) : null;
       const sf = _sfArr ? (_sfArr[h] ?? 1) : 1;
 
-      // ── Irradiance components (CIBSE Guide A 2015 §5.2) ─────────
-      // Direct: angular, only when surface faces sun (sf>0)
-      const I_dir = IDN * sf;
-
-      // Diffuse: ALWAYS hemispherical regardless of orientation.
-      // CIBSE: diffuse irradiance is isotropic → full IDH on any upward/vertical surface.
-      // The 0.4 penalty must ONLY apply to opaque surfaces shaded from the sky vault,
-      // NOT to glazing (which transmits diffuse from the entire sky hemisphere).
-      // For opaque surfaces facing away (sf=0): 40% accounts for ground-reflected diffuse.
-      const I_dif_glaz  = IDH;          // glazing always sees full diffuse sky
-      const I_dif_opaq  = IDH * (sf > 0 ? 1.0 : 0.4);  // opaque: reduced when back-face
-
-      const I_eff_glaz  = (I_dir + I_dif_glaz)  * solarF;
-      const I_eff_opaq  = (I_dir + I_dif_opaq)  * solarF;
+      // ── Irradiancia incidente ───────────────────────────────────
+      // v12.8 — DOS CAMINOS, y el primero es el nuevo por defecto.
+      //
+      // DETALLADO: la misma función que usa el informe de radiación.
+      //   I = DNI·cosθ·sf + difusa(vista al cielo medida, Perez opcional)
+      //       + GHI·ρ·vista al terreno
+      //   Sobre el vidrio cada componente se pondera además por la
+      //   transmitancia angular: el SHGC de catálogo es a incidencia
+      //   normal y sobrestimaría el haz rasante.
+      //
+      // CIBSE SIMPLIFICADO (el de v≤12.7, conservado para reproducir
+      //   resultados antiguos): I_eff = (DNI·sf + DHI)·factor, con
+      //   factor = 0,5 en toda superficie vertical. No proyecta el haz,
+      //   no ve la obstrucción del cielo y no tiene reflejada del
+      //   terreno; por eso no distinguía una ventana protegida de una
+      //   despejada ni una fachada al norte de una al oriente.
+      let I_eff_glaz, I_eff_opaq;
+      const _solCtx = (_solarDetallado && sg) ? contextoSolarHora(h, IDN, IDH) : null;
+      if(_solCtx){
+        _vfSup(sg, s);
+        const ii = irradianciaSup(sg, IDN, IDH, _solCtx.GHI, _solCtx.dir,
+                                  _solCtx.ph, sf, _solCtx.rho);
+        // Opaca: la absortancia solar de un acabado rugoso apenas depende
+        // del ángulo, así que entra la irradiancia tal cual.
+        I_eff_opaq = ii.dir + ii.dif + ii.ref;
+        // Acristalada: ponderada por transmitancia angular relativa.
+        I_eff_glaz = ii.dir * tauRelVidrio(ii.cosInc)
+                   + (ii.dif + ii.ref) * _TAU_VIDRIO_DIF;
+      } else {
+        // Direct: angular, only when surface faces sun (sf>0)
+        const I_dir = IDN * sf;
+        // Diffuse: ALWAYS hemispherical regardless of orientation.
+        // CIBSE: diffuse irradiance is isotropic → full IDH on any upward/vertical surface.
+        // The 0.4 penalty must ONLY apply to opaque surfaces shaded from the sky vault,
+        // NOT to glazing (which transmits diffuse from the entire sky hemisphere).
+        // For opaque surfaces facing away (sf=0): 40% accounts for ground-reflected diffuse.
+        const I_dif_glaz  = IDH;          // glazing always sees full diffuse sky
+        const I_dif_opaq  = IDH * (sf > 0 ? 1.0 : 0.4);  // opaque: reduced when back-face
+        I_eff_glaz  = (I_dir + I_dif_glaz)  * solarF;
+        I_eff_opaq  = (I_dir + I_dif_opaq)  * solarF;
+      }
       const I_eff_safe  = isFinite(isGlaz ? I_eff_glaz : I_eff_opaq)
                           ? (isGlaz ? I_eff_glaz : I_eff_opaq) : 0;
 
@@ -19864,6 +20267,19 @@ async function simular(){
 
   const pc=document.getElementById('pCirc'), pp=document.getElementById('pPct'), ps=document.getElementById('pSub');
 
+  // ── v12.8: leer una sola vez los ajustes solares de la interfaz ───
+  {
+    const aj = refrescarAjustesSolares();
+    log(aj.detallado
+        ? `☀ Irradiancia detallada en el balance: haz proyectado (DNI·cosθ·sf), difusa con vista al cielo `
+          + `${aj.vistaCielo ? 'medida' : 'de hemisferio despejado'}`
+          + `${aj.perez ? ' y cielo anisótropo de Perez' : ' (cielo isótropo)'}`
+          + `, reflejada del terreno con ρ=${aj.rho.toFixed(2)}, y SHGC corregido por ángulo de incidencia.`
+        : '☀ Irradiancia CIBSE simplificada en el balance: (DNI·sf + DHI)·0,5 en vertical, '
+          + 'sin proyección del haz, sin obstrucción del cielo y sin reflejada del terreno (modo v≤12.7).',
+        aj.detallado ? 'ok' : 'info');
+  }
+
   // ── Phase 1: Build shadow cache (ray-casting) ─────────────────────
   if(_shadowCacheDirty || !_shadowCache){
     ps.textContent='Recalculando sombras (geometría actualizada)…';
@@ -19879,6 +20295,26 @@ async function simular(){
     log('Caché de sombras vigente — sin cambios en geometría.');
   }
   const shadowFactors = _shadowCache;
+
+  // ── v12.8 · Fase 1b: factores de vista al cielo y al terreno ──────
+  // El balance térmico necesita ahora los mismos factores de vista que el
+  // informe de radiación. Sin ellos la difusa volvería al hemisferio
+  // despejado y la reflejada del terreno sería la analítica, que es
+  // justamente lo que hacía que dos fachadas con protección solar muy
+  // distinta dieran la misma ganancia por m².
+  resetVistaCieloFallos();
+  if(_solarDetallado && _usarVistaCielo){
+    ps.textContent='Vista al cielo (obstrucción)…';
+    pp.textContent='0%';
+    const cob = await asegurarVistaCielo(
+      surfaces.filter(s=>s.exterior&&s.mesh&&s.mesh.geometry), pct=>{
+        pc.style.strokeDashoffset=207*(1-pct/100);
+        pp.textContent=pct.toFixed(0)+'%';
+      });
+    if(cob.modo !== 'vigente')
+      log(`Vista al cielo medida sobre ${cob.n} superficie(s) (${cob.modo}).`,'ok');
+    await new Promise(r=>setTimeout(r,50));
+  }
 
   // ── Reset dynamic ring buffers (sol-air + Ti mean) ───────────────
   // Must be cleared before each simulation run so stale data from a
@@ -20589,6 +21025,7 @@ function _computeSeasonBalance(periodHours, thermalZones){
     zMap[z.id] = { C: C_air + C_furn, volume: z.volume };
   });
 
+  refrescarAjustesSolares();   // v12.8: mismo criterio solar que la anual
   const shadowFactors = _shadowCache || null;
 
   // Inicializar balance vacío
@@ -26614,7 +27051,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.7
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.8
   </div>
 </div>
 <script>
@@ -27054,6 +27491,7 @@ async function calcularRadiacion(){
   }
 
   // ── v7.3: factor de vista al cielo por obstrucción ───────────────────
+  refrescarAjustesSolares();   // v12.8: mismo estado solar que el balance
   const usarSVF = document.getElementById('radUseSVF')?.checked !== false;
   // v12.3 — Cielo anisótropo de Perez, opcional.
   // Antes de usarlo se le pasa su propia prueba de contraste: sobre plano
@@ -27077,10 +27515,18 @@ async function calcularRadiacion(){
   }
   _radModeloCielo = _perezOK ? 'Perez anisótropo' : 'isótropo (Liu–Jordan)';
   _radVistaCielo  = usarSVF ? 'medida' : 'hemisferio despejado';
-  if(usarSVF && (_svfCacheDirty || !_svfCache)){
-    setStatus('Vista al cielo…');
-    await buildSkyViewFactors(extSurfs.filter(s => s.exterior), p => setStatus(`Vista al cielo ${p}%…`));
+  // El rótulo definitivo se corrige después del bucle si alguna superficie
+  // hubiera tenido que recurrir al hemisferio despejado (ver _svfFallos).
+  if(usarSVF){
+    // v12.8: cobertura garantizada. Antes solo se construía si el caché
+    // estaba sucio o vacío, y una selección distinta a la anterior dejaba
+    // superficies fuera que luego caían al hemisferio despejado sin avisar.
+    const cob = await asegurarVistaCielo(extSurfs.filter(s => s.exterior),
+                                         p => setStatus(`Vista al cielo ${p}%…`));
+    if(cob.modo === 'ampliado')
+      log(`Vista al cielo: ${cob.n} superficie(s) no estaban en el caché y se han medido ahora.`, 'ok');
   }
+  resetVistaCieloFallos();
   setStatus('Calculando radiación…');
 
   // ── Pre-compute surface geometry once ───────────────────────────────
@@ -27126,6 +27572,7 @@ async function calcularRadiacion(){
     // v7.3: si hay factores de vista medidos, sustituyen a los analíticos.
     // Los pisos y losas siguen a cero: no reciben radiación exterior.
     const svf = (usarSVF && _svfCache) ? _svfCache.get(s.id) : null;
+    if(usarSVF && !svf && !isFloor) _svfFallos++;   // v12.8: ya no debería ocurrir
     const skyVF = isFloor ? 0 : (svf ? svf.sky : (1 + cosB) / 2);
     const gndVF = isFloor ? 0 : (svf ? svf.gnd : (1 - cosB) / 2);
     surfGeom.set(s.id, {
@@ -27140,9 +27587,8 @@ async function calcularRadiacion(){
   });
 
   // ── Albedo ──────────────────────────────────────────────────────────
-  const rho = Math.max(0, Math.min(1,
-    parseFloat(document.getElementById('radAlbedo')?.value ?? 0.2)
-  ));
+  // v12.8: una sola lectura, compartida con el balance térmico.
+  const rho = albedoProyecto();
 
   // ── Initialize result accumulators ──────────────────────────────────
   _radResults = new Map();
@@ -27204,24 +27650,14 @@ async function calcularRadiacion(){
           let I_dif = 0;
           let I_ref = 0;
           if(s.exterior){
-            // ── A. Direct ────────────────────────────────────────────────
-            const cosTheta = sg.normal.dot(sunDir);   // cos(angle of incidence)
-            // v12.3: el factor de sombra se necesita también para la
-            // aureola circunsolar de Perez, no solo para la directa, así
-            // que se calcula fuera del condicional.
+            // v12.8 — las tres componentes salen de irradianciaSup(), la
+            // MISMA función que usa ahora el balance térmico. Antes este
+            // bloque tenía su propia copia del cálculo y el balance otra
+            // distinta; mantenerlas sincronizadas a mano no funcionó.
             // Shadow factor from ray-cast cache: 0=shaded, 0.3=glazing, 1=clear
             const sf = _shadowCache ? (_shadowCache.get(s.id)?.[hr] ?? 1) : 1;
-            if(cosTheta > 0){
-              I_dir = DNI * cosTheta * sf;
-            }
-            // ── B. Diffuse sky (isotropic) ───────────────────────────────
-            // Isótropo (Liu–Jordan): radiancia uniforme en toda la bóveda.
-            // Perez: tres componentes, cada una con su propia obstrucción.
-            I_dif = _ph
-              ? perezDifusa(DHI, _ph, sg.normal.y, cosTheta, sg.skyVF, sf)
-              : DHI * sg.skyVF;
-            // ── C. Ground-reflected (albedo) ─────────────────────────────
-            I_ref = GHI * rho * sg.gndVF;
+            const ii = irradianciaSup(sg, DNI, DHI, GHI, sunDir, _ph, sf, rho);
+            I_dir = ii.dir; I_dif = ii.dif; I_ref = ii.ref;
           }
 
           // ── Accumulate ───────────────────────────────────────────────
@@ -27254,6 +27690,17 @@ async function calcularRadiacion(){
         }
       }
     }
+  }
+
+  // ── v12.8: rótulo honesto de la vista al cielo ──────────────────────
+  // Si alguna superficie hubiera tenido que usar el hemisferio despejado
+  // por no estar en el caché, el informe lo dice en vez de llamarlo
+  // «medida». Con asegurarVistaCielo() esto no debería dispararse nunca;
+  // queda como red de seguridad contra una regresión futura.
+  if(usarSVF && _svfFallos > 0){
+    _radVistaCielo = `medida (${_svfFallos} superficie(s) sin medir, con hemisferio despejado)`;
+    log(`⚠ ${_svfFallos} superficie(s) no tenían factor de vista medido y se han calculado con el `
+      + 'hemisferio despejado. El resultado las sobreestima.', 'err');
   }
 
   // ── Convert Wh → kWh ────────────────────────────────────────────────
@@ -28240,7 +28687,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.7</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.8</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -28321,6 +28768,84 @@ function mostrarAcercaDeNuevo(){
           y por etiqueta, y plano de sección arrastrable.</li>
       </ul>
 
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.8</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El caché de vista al cielo caía al hemisferio
+          despejado sin avisar.</strong> Es el fallo más serio corregido en esta versión, porque falseaba
+          resultados sin dar ninguna señal. El caché se construía solo para la selección del momento,
+          pero el consumidor hacía <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">svf ? svf.sky : (1+cos β)/2</span>: una superficie
+          <b>ausente</b> del caché no disparaba un recálculo, sino que se calculaba como si no tuviera
+          nada delante. Y como el caché solo se marca sucio cuando cambia la geometría, bastaba calcular
+          una vez con una selección y volver a calcular con otra para que las superficies nuevas salieran
+          sin obstrucción alguna — mientras el informe seguía declarando «vista al cielo medida».
+          No era un desvío pequeño: en un aula real medida con BioSim, una ventana reportaba
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">726 kWh/m²</span> (difusa 448 = DHI×0,5 exacto, reflejada 215 = GHI×ρ×0,5 exacto)
+          cuando su valor medido es <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">238 kWh/m²</span>. Un factor de tres, y justo en una
+          comparación entre dos alternativas de fachada. Ahora <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">asegurarVistaCielo()</span>
+          garantiza la cobertura: si faltan superficies las mide y las añade al caché en vez de suponer.
+          Queda además un contador de recursos al hemisferio despejado que, si alguna vez se dispara,
+          lo dice en el informe en lugar de llamarlo «medida».</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El caché de vista al cielo no se
+          invalidaba al cambiar la geometría.</strong> Es la otra mitad del fallo anterior, y la más
+          silenciosa de las dos. Los cachés de sombras y de vista al cielo dependen de lo mismo —el BVH de
+          la geometría que proyecta—, pero se invalidaban desde listas distintas:
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">invalidateShadowCache()</span> desde 32 puntos del código y
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">invalidateSVFCache()</span> solo desde 9, un subconjunto estricto.
+          Quedaban fuera, entre otras, las operaciones de importar geometría, borrar una superficie, crear
+          una caja, extruir, cerrar un polígono, mover, rotar o escalar, editar vértices, deshacer y limpiar
+          la escena. Es decir: <b>una vez calculado, el factor de vista al cielo quedaba congelado para el
+          resto de la sesión</b>. Se podía borrar el alero que daba sombra a una ventana y la ventana seguía
+          calculándose como si el alero estuviera ahí. Comprobado sobre un modelo real: tras eliminar 26
+          superficies de sombreado y mover la ventana 400 m al aire libre, v12.7 seguía devolviendo el mismo
+          factor 0,1378 y el caché conservaba incluso las superficies borradas. En v12.8 la invalidación va
+          encadenada dentro de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">invalidateShadowCache()</span>: la misma prueba
+          devuelve ahora 0,1378 → 0,2485 → 0,5000. Encadenarlo, en vez de añadir las 24 llamadas que
+          faltaban, cierra también las futuras: toda mutación geométrica ya llama a la invalidación de
+          sombras por convención del código, y hereda la del cielo sin que nadie tenga que acordarse.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El balance térmico y el informe de radiación
+          calculaban el sol de dos maneras distintas.</strong> El informe proyectaba el haz, medía la vista al
+          cielo con trazado de rayos y sumaba la reflejada del terreno. El balance usaba
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">(DNI·sf + DHI)·0,5</span>, que no proyecta el haz —usa el DNI normal íntegro en
+          cuanto la superficie está soleada, sin el coseno de incidencia—, no ve la obstrucción del cielo
+          y no tiene componente reflejada. Las consecuencias eran concretas: el balance no distinguía una
+          ventana al oriente de una al norte, ni una protegida de una despejada, y su ganancia resultaba
+          casi exactamente proporcional al área acristalada. Medido en dos opciones de fachada del mismo
+          proyecto, la ganancia por m² salía 413,9 y 412,2 kWh/m² —idénticas— cuando la radiación
+          incidente real era de 238 y 539 kWh/m². Desde v12.8 ambos motores llaman a la misma función,
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">irradianciaSup()</span>; si cambia, cambian los dos a la vez.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Transmitancia angular del vidrio.</strong> El SHGC de catálogo
+          se mide a incidencia normal. Mientras el balance usaba el factor plano 0,5 ese detalle quedaba
+          enmascarado; al proyectar el haz correctamente habría que corregirlo o se sobreestimaría la
+          ganancia en fachadas oriente y occidente, donde el sol entra muy oblicuo buena parte del año.
+          Se calcula desde la física —Fresnel para las dos polarizaciones con n=1,526, absorción de
+          Bouguer y reflexiones internas múltiples— y se aplica normalizado, τ(θ)/τ(0). Reproduce los
+          valores publicados para vidrio claro: <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">0,97 a 40°, 0,885 a 60°, 0,45 a 80°</span>,
+          con transmitancia absoluta 0,784 a incidencia normal frente al 0,78 de catálogo de un float de
+          6 mm. Para la difusa y la reflejada se usa el promedio hemisférico ponderado por el coseno,
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">0,90</span>, equivalente a un ángulo efectivo de unos 58°. El modelo se autocomprueba
+          contra esos valores y contra su propia monotonía antes de usarse. Para vidrios múltiples se
+          aplica la misma curva relativa: la forma angular apenas cambia con el número de hojas, y el
+          nivel ya lo fija el SHGC de catálogo. <b>Es una aproximación, declarada como tal.</b></li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Qué cambia en los resultados, medido.</strong> Sobre dos
+          opciones de fachada de un aula en Cali (misma zona, mismo vidrio, mismas cargas internas): la
+          ganancia solar por acristalamiento pasa de 5.819 a 2.230 kWh en la opción de ventana corrida
+          y encerrada, y de 4.194 a 3.768 kWh en la de cinco vanos más despejados. La conclusión de
+          diseño <b>se invierte</b>: donde v12.7 decía que la segunda opción recibía un 28 % menos, v12.8
+          mide que recibe un 69 % más. La temperatura máxima pasa de 36,5 a 33,0 °C en la primera y de
+          38,3 a 40,9 °C en la segunda. <b>Los resultados de v12.7 y anteriores no son comparables con
+          los de v12.8.</b> El interruptor «Irradiancia detallada en el balance», en el panel de
+          simulación, permite volver al método anterior para reproducirlos.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Nuevo diagrama solar.</strong> Antes eran ocho trayectorias de
+          colores distintos, doce radios de azimut, anillos de altitud, eje de cenit rotulado y un cartel
+          oscuro con datos que el panel SOLAR ya mostraba: mucha tinta y ninguna jerarquía. Ahora una sola
+          familia de color, con la <b>banda solar anual</b> translúcida como elemento dominante —de un
+          vistazo se ve qué porción de bóveda recorre el sol en el año—, solsticios en línea continua y
+          meses intermedios punteados, analemas finos, marcadores esféricos en cada hora en punto con su
+          numeral, etiqueta de mes en pastilla sólida, brújula graduada a 1° con el norte en rojo, y el
+          sol en rojo con halo y su rayo punteado hasta el centro. Las capas se encienden y apagan por
+          separado desde el panel SOLAR.</li>
+      </ul>
+
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.7</div>
       <ul style="padding-left:20px;margin:8px 0">
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Guía de uso de los dos ajustes solares</strong>,
@@ -28383,12 +28908,10 @@ function mostrarAcercaDeNuevo(){
           punta</strong>: en mañanas y tardes despejadas, con el sol bajo y encarado, las fachadas este y oeste
           reciben hasta <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">+134 W/m²</span> de difusa más que con el modelo isótropo. Apenas
           mueve la energía anual, pero es justo el tipo de carga que decide un pico de refrigeración.
-          <b>Conviene no sacar de ahí una conclusión que el programa todavía no sostiene:</b> esa cifra
-          <b>no llega</b> al dimensionamiento. El módulo HVAC se alimenta del balance térmico, que sigue
-          con la difusa simplificada del CIBSE y nunca lee los resultados del análisis de radiación. Hoy
-          el dato es <strong style="color:var(--text)">diagnóstico</strong> —sirve para ver en qué fachadas y a qué horas el
-          cielo isótropo se queda corto— y no una entrada del cálculo de potencia. Que llegue exige
-          unificar el tratamiento solar de los dos motores.</li>
+          <b>Esto era cierto hasta la v12.7 y ha dejado de serlo:</b> entonces esa cifra no llegaba al
+          dimensionamiento, porque el balance térmico calculaba su propia difusa simplificada y nunca leía
+          el análisis de radiación. <b>En v12.8 los dos motores comparten una sola función de irradiancia</b>,
+          de modo que el pico sí llega al balance y, a través de él, al módulo HVAC.</li>
         <li style="margin-bottom:7px">El modelo <strong style="color:var(--text)">se autocomprueba antes de
           usarse</strong>: sobre plano horizontal debe devolver la difusa horizontal medida, exactamente. Si no
           supera esa prueba, BioSim lo dice y calcula con el cielo isótropo en vez de seguir con un modelo
@@ -28936,10 +29459,10 @@ I_total = I_dir + I_dif + I_ref`)}
       están los modos «día» y «rango»—, para diseño de protecciones solares, para la hora crítica y para
       fachadas este y oeste, donde la diferencia en el pico llega a 122 y 134 W/m².
       <br><br>
-      <strong>Use el isótropo</strong> cuando el resultado vaya a compararse con el <strong>balance térmico o el
-      módulo HVAC</strong>. El motor térmico asigna <span style="font-family:var(--font-mono)">0,5·IDH</span> a un muro vertical y
-      <span style="font-family:var(--font-mono)">IDH</span> a una cubierta plana, que son exactamente los valores de Liu–Jordan: con el
-      isótropo seleccionado los dos motores comparten supuesto, con Perez no.
+      <strong>Hasta v12.7 había una razón más para preferir el isótropo</strong>: era el único que coincidía
+      con lo que hacía el balance térmico. Ese motivo ha desaparecido. Desde v12.8 el balance usa la misma
+      función de irradiancia que este análisis —incluido Perez si está activo—, de modo que la casilla ya
+      no desincroniza nada y la elección depende solo de la escala temporal del estudio.
       <br><br>
       <strong>Para totales anuales la elección importa poco.</strong> La diferencia en verticales es del 6 al 8 %,
       por debajo de la incertidumbre de otras cosas del modelo —el albedo supuesto, la ausencia de
@@ -28957,6 +29480,30 @@ I_total = I_dir + I_dif + I_ref`)}
       con difusa anómala, apagarla separa un problema de geometría, como una normal invertida, de un
       problema del modelo de cielo.
       <br><br>
+      <strong>El balance térmico usa esta misma irradiancia (v12.8).</strong> Conviene saber qué hacía antes,
+      porque explica resultados antiguos que hoy no se reproducen. Hasta v12.7 el motor térmico tenía su propio
+      cálculo solar, mucho más basto:
+      ${CODEBLK(`I_eff = (DNI · f_sombra + DHI) · factor       [v12.7 y anteriores]
+        factor = 0,5  en todo muro o ventana vertical
+        factor = n_y  en cubiertas y claraboyas
+        factor = 0    en pisos`)}
+      Es decir: no proyectaba el haz —usaba el DNI normal íntegro en cuanto la superficie estaba soleada, sin
+      el coseno de incidencia—, no veía la obstrucción del cielo y no tenía componente reflejada del terreno.
+      Tres consecuencias prácticas: <strong>una ventana al norte y una al oriente recibían lo mismo</strong>; una
+      ventana bajo un alero profundo y otra despejada también; y la ganancia por acristalamiento salía casi
+      exactamente proporcional al área de vidrio. Medido sobre dos opciones de fachada de un mismo proyecto,
+      la ganancia por m² daba 413,9 y 412,2 kWh/m² —indistinguibles— cuando la radiación incidente real
+      medida era de 238 y 539 kWh/m².
+      <br><br>
+      Desde v12.8 el balance llama a <span style="font-family:var(--font-mono)">irradianciaSup()</span>, la misma
+      función de este módulo, y añade la <strong>transmitancia angular del vidrio</strong>: el SHGC de catálogo se
+      mide a incidencia normal, y proyectar bien el haz sin corregirlo sobreestimaría las fachadas oriente y
+      occidente. La curva sale de Fresnel con n=1,526 y absorción de Bouguer, normalizada como τ(θ)/τ(0);
+      vale 0,97 a 40°, 0,885 a 60° y 0,45 a 80°, y para la difusa y la reflejada se usa el promedio
+      hemisférico 0,90. <strong>Los resultados térmicos de v12.7 y anteriores no son comparables con los de
+      v12.8.</strong> El interruptor «Irradiancia detallada en el balance», en el panel de simulación, permite
+      volver al método anterior cuando haga falta reproducir un estudio viejo.
+      <br><br>
       <strong>Sombreado por ray-casting</strong>. Para cada hora del año y cada superficie exterior, se lanza un
       rayo desde su centroide hacia la posición solar. Si el rayo intersecta otra malla, esa hora se registra como
       sombreada (f_sombra = 0). Para ventanas se usa un factor blend = 0.3 (mitad sombra) para evitar que un
@@ -28970,9 +29517,31 @@ I_total = I_dir + I_dif + I_ref`)}
     `)}
 
     ${SECCION('📐 Diagrama Solar 3D y Posición Solar', `
-      El diagrama solar superpuesto en escena dibuja las <strong>trayectorias solares</strong> para los 12 meses
-      del año (líneas curvas) y los analemas horarios de 6 a 18 h (líneas verticales que conectan posiciones
-      solares a la misma hora a lo largo del año). La posición solar se calcula con el algoritmo de
+      El diagrama solar superpuesto en escena se rediseñó en <strong>v12.8</strong>. Se compone de cinco capas,
+      que se encienden y apagan por separado desde el panel SOLAR:
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:5px"><strong>Banda solar anual</strong> — superficie translúcida que barre el
+          sol entre los dos solsticios. Es el elemento que da sentido al conjunto de un vistazo: lo que queda
+          dentro de la banda recibe sol en algún momento del año; lo de fuera, nunca. Para decidir dónde poner
+          una protección solar o un hueco, es la lectura más rápida que ofrece el diagrama.</li>
+        <li style="margin-bottom:5px"><strong>Trayectorias del día 21</strong> de los meses elegidos. Los
+          solsticios (junio y diciembre) van en línea continua y el resto punteados, porque son los dos que
+          acotan el recorrido; marzo y septiembre dan prácticamente la misma curva.</li>
+        <li style="margin-bottom:5px"><strong>Analemas horarios</strong> — el ocho que describe el sol al
+          mirarlo a la misma hora a lo largo del año. Cruzan la banda y permiten leer la deriva estacional
+          de una hora concreta.</li>
+        <li style="margin-bottom:5px"><strong>Marcadores y etiquetas</strong> — una esfera en cada hora en punto
+          con su numeral, y una pastilla con el día al vértice de cada trayectoria.</li>
+        <li style="margin-bottom:5px"><strong>Anillos de altitud</strong> — círculos de 15° en 15° sobre el
+          plano, para leer la altura solar directamente.</li>
+      </ul>
+      La brújula del horizonte va graduada a 1°, con marcas más largas cada 5° y 10°, rótulos de grado cada 30°
+      y el norte en rojo. El sol de la hora actual se dibuja en rojo con halo, con su rayo punteado hasta el
+      centro del modelo y su azimut proyectado sobre el suelo. Los datos numéricos (altura, azimut, declinación,
+      amanecer y ocaso) <strong>no</strong> se repiten en la escena: están en el panel SOLAR, y duplicarlos en un
+      cartel 3D tapaba el modelo.
+      <br><br>
+      La posición solar se calcula con el algoritmo de
       <strong>Spencer (1971)</strong> ajustado al meridiano local, considerando la ecuación del tiempo y la
       declinación.
       ${CODEBLK(`δ = 23.45° · sin(360° · (284 + n) / 365)        [declinación]
