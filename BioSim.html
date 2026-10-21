@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.11</title>
+<title>BioSim v12.11.1</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.11</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.11.1</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyecto()" style="font-weight:700" title="Sobrescribe el archivo del proyecto sin preguntar. La primera vez pide dónde guardarlo.">💾 Guardar proyecto <span style="float:right;opacity:.55;font-weight:400">Ctrl+S</span></a>
@@ -5648,7 +5648,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.11 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.11.1 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -27487,7 +27487,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.11
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.11.1
   </div>
 </div>
 <script>
@@ -29173,7 +29173,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.11</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.11.1</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -29282,7 +29282,26 @@ function mostrarAcercaDeNuevo(){
           <br><br>
           La temperatura interior que lee el control es la del principio del paso, no la que se está
           resolviendo. No es una concesión numérica: un termostato real también mide el presente y actúa
-          sobre el futuro inmediato. Con los sub-pasos por defecto el desfase es de 20 minutos.</li>
+          sobre el futuro inmediato. Con los sub-pasos por defecto el desfase es de 20 minutos.
+          <br><br>
+          <b>Los dos parámetros que no son evidentes</b>, medidos los dos (el manual técnico los desarrolla):
+          <br>
+          · <b>La banda proporcional</b> evita que el control sea todo-o-nada. Sin ella abriría de golpe a
+          23,9 °C y cerraría a 24,1 °C, con el resultado dependiendo del paso de tiempo en vez de la
+          física. Variando solo la banda sobre la misma vivienda, el pico apenas se mueve —29,30 °C con
+          0,1 K frente a 29,57 °C con 5 K— pero los saltos bruscos caen de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">659 a 37</span>
+          y el caudal medio baja un <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">44 %</span>, de 0,77 a 0,43 ren/h, con la ventana
+          abierta más horas y menos abierta cada vez. Eso es modular en lugar de conmutar.
+          <br>
+          · <b>El ΔT mínimo interior−exterior</b> es lo que separa «ventilar porque hace calor dentro» de
+          «ventilar porque fuera ayuda». Contrafactual medido sobre un aula en Cali con consigna de 26 °C:
+          un control sin esa condición abriría 8.734 horas al año y <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">1.518 de ellas, el
+          17,4 %</span>, tendrían el exterior más caliente que el interior — 2.207 K·h de calor importado
+          justo en las horas que peor vienen. En la vivienda de Bogotá el mismo contrafactual da
+          <b>cero</b> horas dañinas, porque con 23,6 °C de máxima exterior el aire de fuera nunca está más
+          caliente que un interior que ya pasa de 24. <b>Decisiva en clima cálido, inerte en clima frío de
+          altura.</b> La condición no se puede desactivar: la rampa tiene un suelo de 0,5 K aunque se
+          ponga ΔT_min = 0, así que el control nunca puede configurarse para importar calor.</li>
         <li style="margin-bottom:7px"><strong style="color:var(--text)">Las renovaciones se calculan ahora en un solo sitio.</strong>
           Había tres copias de esa cuenta —el solver, el balance pre-solver y el diagnóstico de
           ventilación excesiva— y añadir un método nuevo habría obligado a tocar las tres y a
@@ -30271,6 +30290,76 @@ Banda 90% = T_neu ± 2.5 °C    [aceptabilidad estricta, 90% de ocupantes confor
       <strong>Visualización de tripartición.</strong> En el bloque de conclusiones del confort se muestra una
       barra apilada con las tres categorías (frío / confort / caliente) y un diagnóstico automático que sugiere
       acciones (aumentar inercia, protección solar, ventilación nocturna, aislamiento) según el patrón dominante.
+    `)}
+
+    ${SECCION('🌬 Ventilación — horario fijo y control por temperatura', `
+      BioSim ofrece cuatro métodos de ventilación por zona. Los tres primeros
+      —<strong>renovaciones/h</strong>, <strong>L/s por persona</strong> y <strong>L/s por m²</strong>—
+      fijan un caudal y lo modulan por el horario de ventilación. El cuarto,
+      <strong>por temperatura</strong> (v12.11), decide la apertura según el estado térmico.
+      <br><br>
+      <strong>El horario siempre actúa, pero no significa lo mismo.</strong> En los tres primeros métodos
+      el horario dice <em>cuándo se ventila</em>: multiplica el caudal hora a hora. Conviene saberlo porque
+      el perfil que viene por defecto es de oficina —0,10 de noche, 0,20 en fin de semana, 1,00 solo de 08
+      a 15 h—, de modo que teclear 1 ren/h da entre 0,6 y 1,5 según la hora, y 113 de las 168 horas de la
+      semana quedan por debajo de 1. En el método por temperatura el horario dice
+      <em>cuándo se puede abrir</em>: presencia, seguridad, lluvia. Dentro de esa ventana, quien abre y
+      cierra es la temperatura.
+      <br><br>
+      <strong>Por qué existe el cuarto método.</strong> Un horario fijo no puede describir un edificio en
+      régimen libre: nadie abre la ventana a una hora, la abre cuando hace calor dentro y fuera está más
+      fresco. Medido sobre una vivienda en Bogotá con 61 % de ventana respecto al piso: el horario del
+      proyecto daba 42,0 °C de pico y 412 horas sobre 30 °C; ventilar 6 ren/h de 08 a 18 h quitaba todas
+      esas horas de calor pero llevaba las horas bajo 16 °C de 168 a 1.165. O sobrecalienta o sobreenfría,
+      según la hora: con horario fijo el óptimo no existe.
+      ${CODEBLK(`ACH_vent = ACH_max · f_T · f_ΔT · f_Te · horario
+
+  f_T  = rampa( Ti − T_set , banda )          cuánto calor sobra dentro
+  f_ΔT = rampa( (Ti − Te) − ΔT_min , ΔT_min ) si el aire exterior ayuda
+  f_Te = rampa( Te − Te_min , 1 K )           que fuera no esté helado
+
+  rampa(x, a) = 0 si x ≤ 0 · x/a si 0 < x < a · 1 si x ≥ a`)}
+
+      <strong>La banda proporcional.</strong> Sin ella el control sería todo-o-nada: cerrado a 23,9 °C y
+      abierto del todo a 24,1 °C. Eso produce traqueteo — abre, enfría por debajo de la consigna, cierra,
+      calienta, abre — y el resultado pasa a depender del paso de tiempo en vez de la física. La banda
+      reparte la transición: a T_set está al 0 %, a T_set + banda al 100 %, lineal entre medias. También
+      describe mejor la realidad: una ventana no es binaria, se entreabre cuando sobra poco calor y se
+      abre del todo cuando sobra mucho. Medido sobre la misma vivienda, variando solo la banda:
+      ${CODEBLK(`banda   T máx    ACH medio   horas abierta   saltos bruscos
+ 0,1 K  29,30 °C    0,77         1.165            659
+ 0,5 K  29,36 °C    0,70         1.288            617
+ 2   K  29,38 °C    0,58         1.957            158
+ 5   K  29,57 °C    0,43         2.089             37`)}
+      El pico apenas se mueve —0,27 °C entre los extremos—, pero los saltos bruscos caen de 659 a 37. Y
+      fíjese en las dos columnas centrales: al ensanchar la banda la ventana está abierta <b>más horas</b>
+      pero mueve <b>un 44 % menos de aire</b>. Eso es modular en vez de conmutar: mismo resultado térmico
+      con menos corriente, menos ruido y menos pérdida en los márgenes. Valores típicos: 1–3 K.
+      <br><br>
+      <strong>El ΔT mínimo interior−exterior.</strong> Ventilar solo enfría si el aire que entra está más
+      frío que el local. Sin esta condición, un control que abriera «cuando hace calor dentro» metería
+      aire <em>más caliente</em> en las horas en que fuera aprieta, empeorando justo cuando más importa.
+      Medido como contrafactual sobre un aula en Cali, con consigna de 26 °C: un control sin la condición
+      de ΔT abriría 8.734 horas al año, y <b>1.518 de ellas —el 17,4 %— tendrían el exterior más caliente
+      que el interior</b>, acumulando 2.207 K·h de calor importado. En la vivienda de Bogotá, en cambio,
+      el contrafactual da <b>cero</b> horas dañinas: con una máxima exterior de 23,6 °C el aire de fuera
+      nunca está más caliente que un interior que ya pasa de 24. <b>La condición es decisiva en clima
+      cálido e inerte en clima frío de altura</b>, y conviene saber en cuál de los dos está.
+      <br><br>
+      La condición no se puede desactivar: la rampa tiene un suelo de 0,5 K aunque se ponga ΔT_min = 0, de
+      modo que el control nunca puede configurarse para importar calor. Lo que sí hace el parámetro es
+      subir el listón — cuánta diferencia exige antes de molestarse en abrir. Subirlo ahorra aire a costa
+      de control del pico: en el aula de Cali, pasar de 1 a 3 K baja el caudal medio un 41 % (1,36 → 0,80
+      ren/h) pero sube el pico 1,05 °C y añade 64 horas sobre 30 °C. Valores típicos: 1–2 K.
+      <br><br>
+      <strong>Qué temperatura lee el control.</strong> La del principio del paso, no la que se está
+      resolviendo. No es una concesión numérica: un termostato real también mide el presente y actúa sobre
+      el futuro inmediato. Con los sub-pasos por defecto el desfase es de 20 minutos.
+      <br><br>
+      <strong>Limitación declarada.</strong> El modelo supone que el caudal máximo está disponible siempre
+      que el control lo pida. No calcula el caudal real por tiro térmico o presión de viento a partir del
+      área de las aberturas: ese ACH máximo lo estima usted. Orientación habitual: 3–6 ren/h con
+      ventilación simple, 6–15 con ventilación cruzada.
     `)}
 
     ${SECCION('🔗 Acoplamiento Térmico Interzonal', `
