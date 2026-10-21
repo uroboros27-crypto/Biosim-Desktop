@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.10.1</title>
+<title>BioSim v12.11</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.10.1</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.11</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyecto()" style="font-weight:700" title="Sobrescribe el archivo del proyecto sin preguntar. La primera vez pide dónde guardarlo.">💾 Guardar proyecto <span style="float:right;opacity:.55;font-weight:400">Ctrl+S</span></a>
@@ -4563,6 +4563,7 @@ canvas#cv{display:block;}
             <option value="ach">Cambios de aire/h</option>
             <option value="per_person">L/s por persona</option>
             <option value="per_area">L/s por m²</option>
+            <option value="termo">Por temperatura (ventana operable)</option>
           </select></div>
         <div id="zdVentVal"></div>
         <div class="zsec">💨 Infiltración</div>
@@ -5647,7 +5648,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.10.1 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.11 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -15984,9 +15985,76 @@ function zoneDefaults(){
     equipLoad:5, equipLatent:2,
     ventMethod:'ach', ventACH:1.0, ventPerPerson:8, ventPerArea:0.5,
     infiltACH:0.5, infiltWindSens:0.25,
+    // v12.11 — ventilación controlada por temperatura (ventMethod='termo')
+    ventTset:24,      // °C interiores a partir de los cuales se empieza a abrir
+    ventBanda:2,      // °C de banda proporcional: abierto del todo en Tset+banda
+    ventDTmin:1,      // K mínimos de Ti−Te para que ventilar sirva de algo
+    ventTeMin:8,      // °C exteriores por debajo de los cuales no se abre
+    ventACHmax:6,     // renovaciones/h con la abertura al máximo
     schedOcc:null, schedLight:null, schedEquip:null,
     schedVent:null, schedInfil:null
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  v12.11 — RENOVACIONES DE VENTILACIÓN: UNA SOLA IMPLEMENTACIÓN
+//
+//  Había tres copias de esta cuenta —el solver, el balance pre-solver y
+//  el diagnóstico— y cualquier método nuevo habría que añadirlo en las
+//  tres. Como ya pasó con la irradiancia, se unifica antes de ampliar.
+//
+//  MÉTODO 'termo' (nuevo). Los otros tres fijan un caudal y lo modulan
+//  solo por horario, de modo que el reloj decide cuándo se ventila. Eso
+//  no describe lo que gobierna un edificio en régimen libre: nadie abre
+//  la ventana a una hora, la abre cuando hace calor dentro y fuera está
+//  más fresco. Con horario fijo el resultado es o sobrecalentamiento o
+//  sobreenfriamiento, según la hora, y el óptimo no existe como horario.
+//
+//  El control abre con tres condiciones multiplicativas, todas en rampa
+//  para que no oscile entre abierto y cerrado de un paso al siguiente:
+//    f_T  = (Ti − Tset) / banda          → cuánto calor sobra dentro
+//    f_dT = (Ti − Te − dTmin) / dTmin    → si el aire exterior ayuda
+//    f_Te = (Te − TeMin) / 1 K           → no abrir con exterior helado
+//  y el horario pasa a ser la VENTANA DE DISPONIBILIDAD: cuándo es
+//  posible abrir (presencia, seguridad, lluvia), no cuándo se abre.
+//
+//  Ti es la temperatura al principio del paso, no la que se está
+//  resolviendo. No es una concesión numérica: un termostato real también
+//  mide el presente y actúa sobre el futuro inmediato. Con los sub-pasos
+//  por defecto el desfase es de 20 minutos.
+// ══════════════════════════════════════════════════════════════════════
+function _rampa(x, ancho){
+  if(!(ancho > 0)) return x > 0 ? 1 : 0;
+  return Math.max(0, Math.min(1, x / ancho));
+}
+
+// Devuelve las renovaciones/h de VENTILACIÓN (sin incluir infiltración).
+//   L         cargas de la zona
+//   ventF     factor del horario en esta hora (0..1)
+//   Ti, Te    temperaturas interior (inicio del paso) y exterior
+//   floorArea, volumen  de la zona
+function achVentilacion(L, ventF, Ti, Te, floorArea, volumen){
+  const V = Math.max(1, volumen);
+  let base = 0;
+  if(L.ventMethod === 'termo'){
+    const Tset  = isFinite(L.ventTset)   ? L.ventTset   : 24;
+    const banda = isFinite(L.ventBanda)  ? L.ventBanda  : 2;
+    const dTmin = isFinite(L.ventDTmin)  ? L.ventDTmin  : 1;
+    const TeMin = isFinite(L.ventTeMin)  ? L.ventTeMin  : 8;
+    const ACHmx = isFinite(L.ventACHmax) ? L.ventACHmax : 6;
+    if(!isFinite(Ti) || !isFinite(Te)) return 0;
+    const fT  = _rampa(Ti - Tset, banda);
+    const fdT = _rampa((Ti - Te) - dTmin, Math.max(0.5, dTmin));
+    const fTe = _rampa(Te - TeMin, 1);
+    base = ACHmx * fT * fdT * fTe;
+  } else if(L.ventMethod === 'ach'){
+    base = L.ventACH || 0;
+  } else if(L.ventMethod === 'per_person'){
+    base = (L.ventPerPerson||10) * (L.occDensity||0.1) * floorArea / V * 1000/3600;
+  } else if(L.ventMethod === 'per_area'){
+    base = (L.ventPerArea||0.5) * floorArea / 1000 * 3600 / V;
+  }
+  return Math.max(0, base * (isFinite(ventF) ? ventF : 1));
 }
 
 function ensureZoneLoads(z){
@@ -15997,6 +16065,11 @@ function ensureZoneLoads(z){
   const L=z._loads;
   const _keyToType={schedOcc:'occ',schedLight:'light',schedEquip:'equip',schedVent:'vent',schedInfil:'infil'};
   Object.keys(_keyToType).forEach(key=>{ if(!L[key]) L[key]=defaultSched(_keyToType[key]); });
+  // v12.11 — parámetros del control por temperatura. Un proyecto guardado
+  // antes de esta versión no los trae; se rellenan aquí para que la zona
+  // quede completa y el archivo los conserve al volver a guardarlo.
+  const _termoDef = {ventTset:24, ventBanda:2, ventDTmin:1, ventTeMin:8, ventACHmax:6};
+  Object.keys(_termoDef).forEach(k=>{ if(!isFinite(L[k])) L[k]=_termoDef[k]; });
   // v4.0: estructura de contraventanas. La inicializamos vacía — el usuario
   // elige qué ventanas tienen contraventana en el panel de la zona.
   if(!L.shutters){
@@ -16172,6 +16245,7 @@ function showZoneProps(zid){
         <option value="ach"${L.ventMethod==='ach'?' selected':''}>Cambios de aire / h</option>
         <option value="per_person"${L.ventMethod==='per_person'?' selected':''}>L/s por persona</option>
         <option value="per_area"${L.ventMethod==='per_area'?' selected':''}>L/s por m²</option>
+        <option value="termo"${L.ventMethod==='termo'?' selected':''}>Por temperatura (ventana operable)</option>
       </select></div>
     ${L.ventMethod==='ach'?`
     <div class="prow"><div class="plbl">ACH ventilación</div>
@@ -16185,6 +16259,32 @@ function showZoneProps(zid){
     <div class="prow"><div class="plbl">L/s·m²</div>
       <input class="pinp" type="number" value="${L.ventPerArea}" step="0.1" min="0"
         onchange="zones.find(x=>x.id==='${z.id}')._loads.ventPerArea=+this.value"></div>`:''}
+    ${L.ventMethod==='termo'?`
+    <div style="font-size:.57rem;color:var(--text3);line-height:1.5;background:var(--bg3);border-radius:4px;padding:6px 8px;margin:4px 0">
+      Abre cuando dentro hace calor <b>y</b> fuera está más fresco, como haría alguien con la ventana.
+      El horario deja de ser «cuándo se ventila» y pasa a ser <b>cuándo se puede abrir</b>
+      (presencia, seguridad, lluvia).
+    </div>
+    <div class="prow"><div class="plbl">Abre a partir de (°C int.)</div>
+      <input class="pinp" type="number" value="${L.ventTset!=null?L.ventTset:24}" step="0.5"
+        title="Temperatura interior a partir de la cual empieza a abrirse"
+        onchange="zones.find(x=>x.id==='${z.id}')._loads.ventTset=+this.value;showZoneProps('${z.id}')"></div>
+    <div class="prow"><div class="plbl">Banda proporcional (K)</div>
+      <input class="pinp" type="number" value="${L.ventBanda!=null?L.ventBanda:2}" step="0.5" min="0.5"
+        title="Grados por encima del umbral en los que pasa de cerrada a abierta del todo. Evita que oscile entre abierto y cerrado."
+        onchange="zones.find(x=>x.id==='${z.id}')._loads.ventBanda=+this.value;showZoneProps('${z.id}')"></div>
+    <div class="prow"><div class="plbl">ΔT mínimo int−ext (K)</div>
+      <input class="pinp" type="number" value="${L.ventDTmin!=null?L.ventDTmin:1}" step="0.5" min="0"
+        title="Si fuera no hace al menos estos grados menos que dentro, abrir no refresca y no se abre."
+        onchange="zones.find(x=>x.id==='${z.id}')._loads.ventDTmin=+this.value;showZoneProps('${z.id}')"></div>
+    <div class="prow"><div class="plbl">No abrir si ext &lt; (°C)</div>
+      <input class="pinp" type="number" value="${L.ventTeMin!=null?L.ventTeMin:8}" step="1"
+        title="Por debajo de esta temperatura exterior no se abre, aunque dentro sobre calor."
+        onchange="zones.find(x=>x.id==='${z.id}')._loads.ventTeMin=+this.value;showZoneProps('${z.id}')"></div>
+    <div class="prow"><div class="plbl">ACH con abertura máxima</div>
+      <input class="pinp" type="number" value="${L.ventACHmax!=null?L.ventACHmax:6}" step="0.5" min="0"
+        title="Renovaciones por hora con la ventana totalmente abierta. Orientación: 3–6 ventilación simple, 6–15 cruzada."
+        onchange="zones.find(x=>x.id==='${z.id}')._loads.ventACHmax=+this.value;showZoneProps('${z.id}')"></div>`:''}
     <div class="section-hdr">💨 Infiltración</div>
     <div class="prow"><div class="plbl">Infiltración base (ach)</div>
       <input class="pinp" type="number" value="${L.infiltACH}" step="0.1" min="0"
@@ -16192,8 +16292,16 @@ function showZoneProps(zid){
     <div class="prow"><div class="plbl">Sens. al viento (ach/m/s)</div>
       <input class="pinp" type="number" value="${L.infiltWindSens}" step="0.05" min="0"
         onchange="zones.find(x=>x.id==='${z.id}')._loads.infiltWindSens=+this.value"></div>
-    <div class="chip" style="margin-top:8px"><span class="cl">Total renovaciones/h (en reposo)</span>
+    ${L.ventMethod==='termo'?`
+    <div class="chip" style="margin-top:8px"><span class="cl">Renovaciones/h · cerrada → abierta</span>
+      <span class="cv">${(L.infiltACH).toFixed(2)} → ${(L.infiltACH+(L.ventACHmax!=null?L.ventACHmax:6)).toFixed(2)} ACH</span></div>
+    `:`
+    <div class="chip" style="margin-top:8px"><span class="cl">Total renovaciones/h (horario al 100%)</span>
       <span class="cv">${(L.infiltACH+L.ventACH).toFixed(2)} ACH</span></div>
+    <div style="font-size:.55rem;color:var(--text3);margin-top:3px;line-height:1.45">
+      El horario de ventilación multiplica este valor hora a hora, así que la cifra real baja en las
+      horas en que el horario no está al 100%. Revísalo en 📅 Editor de Horarios.
+    </div>`}
   </div>
   <!-- Horarios -->
   <div id="ztSched" class="h">
@@ -19981,12 +20089,9 @@ function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rh
     H[zi][zi] -= G_infil;
     Q[zi]     += G_infil * Te;
 
-    // Mechanical ventilation — implicit, schedule-modulated
-    let achVentBase=0;
-    if(L.ventMethod==='ach') achVentBase=L.ventACH||0;
-    else if(L.ventMethod==='per_person') achVentBase=(L.ventPerPerson||10)*(L.occDensity||0.1)*floorAreaZ/Math.max(1,zobj.volume)*1000/3600;
-    else if(L.ventMethod==='per_area')   achVentBase=(L.ventPerArea||0.5)*floorAreaZ/1000*3600/Math.max(1,zobj.volume);
-    const achVent = Math.max(0, achVentBase * ventF);
+    // Ventilación — implícita, modulada por horario y, en modo 'termo',
+    // por la temperatura interior del principio del paso (v12.11).
+    const achVent = achVentilacion(L, ventF, Ti, Te, floorAreaZ, zobj.volume);
     if(achVent>0){
       const G_vent = rhoA*CpA * achVent/3600 * zobj.volume;
       H[zi][zi] -= G_vent;
@@ -20709,11 +20814,7 @@ async function simular(){
           if(Q_infil_eb>0) eBalance[zi].gainInfil += Q_infil_eb;
           else             eBalance[zi].lossInfil -= Q_infil_eb;
 
-          let achVent_eb_base=0;
-          if(L.ventMethod==='ach') achVent_eb_base=L.ventACH||0;
-          else if(L.ventMethod==='per_person') achVent_eb_base=(L.ventPerPerson||10)*(L.occDensity||0.1)*floorAreaEB/Math.max(1,zobj.volume)*1000/3600;
-          else if(L.ventMethod==='per_area')   achVent_eb_base=(L.ventPerArea||0.5)*floorAreaEB/1000*3600/Math.max(1,zobj.volume);
-          const achVent_eb=Math.max(0, achVent_eb_base*_eb_ventF);
+          const achVent_eb = achVentilacion(L, _eb_ventF, Ti_old, Te, floorAreaEB, zobj.volume);
           if(achVent_eb>0){
             const G_vent_eb=rhoA*CpA*achVent_eb/3600*zobj.volume;
             const Q_vent_eb=G_vent_eb*(Te-Ti_old);
@@ -20832,8 +20933,14 @@ async function simular(){
           ensureZoneLoads(z0);
           const L0 = z0._loads;
           const G_inf  = rhoA*CpA*(L0.infiltACH||0.3)/3600*z0.volume;
-          let achVent0 = 0;
-          if(L0.ventMethod==='ach') achVent0=L0.ventACH||0;
+          // v12.11: en modo 'termo' el caudal depende de la temperatura, así
+          // que para este diagnóstico estático se usa el máximo declarado —
+          // es el peor caso, que es lo que el aviso quiere detectar.
+          const flA_diag = surfaces.filter(s=>s.zoneId===z0.id&&_TAGS_PISO.includes(s.tag||autoTag(s)))
+                             .reduce((a,s)=>a+s.area,0) || Math.max(1,z0.volume/3);
+          const achVent0 = (L0.ventMethod==='termo')
+            ? (isFinite(L0.ventACHmax) ? L0.ventACHmax : 6)
+            : achVentilacion(L0, 1, 99, -99, flA_diag, z0.volume);
           const G_vent0 = rhoA*CpA*achVent0/3600*z0.volume;
           const UA_z0  = surfaces.filter(s=>s.zoneId===z0.id&&s.exterior)
                            .reduce((a,s)=>{ const p=surfParams[s.id]; return a+(p?p.U*s.area:0); }, 0);
@@ -24041,10 +24148,40 @@ function zdRefreshVent(){
     container.innerHTML = `<div class="zrow"><div class="zlbl">L/s por persona</div>
       <input class="zinp" type="number" value="${L.ventPerPerson||10}" step="1" min="0"
         onchange="zdSaveL('ventPerPerson',+this.value)"></div>`;
+  } else if(meth==='termo'){
+    // v12.11 — control por temperatura. El horario pasa a significar
+    // «cuándo se puede abrir», no «cuándo se ventila».
+    const g=(k,d)=>isFinite(L[k])?L[k]:d;
+    const fila=(lbl,key,val,step,tip)=>`<div class="zrow" title="${tip}">
+        <div class="zlbl">${lbl}</div>
+        <input class="zinp" type="number" value="${val}" step="${step}"
+          onchange="zdSaveL('${key}',+this.value);zdRefreshVent()"></div>`;
+    container.innerHTML =
+      `<div style="padding:6px 8px;font-size:.58rem;color:var(--text2);line-height:1.5;background:rgba(60,140,110,.08);border-left:3px solid rgba(60,140,110,.6);margin:0 0 6px;border-radius:4px">
+         Abre cuando hace calor dentro <b>y</b> fuera está más fresco, como haría alguien con la ventana.
+         El horario de ventilación deja de decir <i>cuándo se ventila</i> y pasa a decir
+         <b>cuándo se puede abrir</b>: presencia, seguridad, lluvia.
+       </div>`
+      + fila('Abre a partir de (°C int.)','ventTset',   g('ventTset',24),  '0.5','Temperatura interior a partir de la cual empieza a abrirse')
+      + fila('Banda proporcional (K)',    'ventBanda',  g('ventBanda',2),  '0.5','Grados por encima del umbral en los que pasa de cerrada a abierta del todo. Evita que oscile.')
+      + fila('ΔT mínimo int−ext (K)',     'ventDTmin',  g('ventDTmin',1),  '0.5','Si fuera no hace al menos estos grados menos que dentro, abrir no refresca y no se abre.')
+      + fila('No abrir si ext < (°C)',    'ventTeMin',  g('ventTeMin',8),  '1',  'Por debajo de esta temperatura exterior no se abre aunque sobre calor dentro.')
+      + fila('ACH con abertura máxima',   'ventACHmax', g('ventACHmax',6), '0.5','Renovaciones/h con la ventana totalmente abierta. Orientación: 3–6 simple, 6–15 cruzada.')
+      + `<div style="font-size:.56rem;color:var(--text3);padding:2px 8px 0;line-height:1.45">
+           Renovaciones/h de cerrada a abierta: <b>${(L.infiltACH||0).toFixed(2)} → ${((L.infiltACH||0)+g('ventACHmax',6)).toFixed(2)}</b>
+         </div>`;
   } else {
     container.innerHTML = `<div class="zrow"><div class="zlbl">L/s por m²</div>
       <input class="zinp" type="number" value="${L.ventPerArea||0.5}" step="0.1" min="0"
         onchange="zdSaveL('ventPerArea',+this.value)"></div>`;
+  }
+  // v12.11 — el total debe reflejar lo que de verdad ocurre en cada modo.
+  const tot=document.getElementById('zdVentTotal');
+  if(tot){
+    const inf=L.infiltACH||0;
+    tot.textContent = (meth==='termo')
+      ? `${inf.toFixed(2)} → ${(inf+(isFinite(L.ventACHmax)?L.ventACHmax:6)).toFixed(2)} ACH`
+      : `${(inf+(L.ventACH||0)).toFixed(2)} ACH · el horario lo modula`;
   }
 }
 
@@ -25859,6 +25996,10 @@ function _serializarProyecto(){
           equipLoad:z._loads.equipLoad,   equipLatent:z._loads.equipLatent,
           ventMethod:z._loads.ventMethod, ventACH:z._loads.ventACH,
           ventPerPerson:z._loads.ventPerPerson, ventPerArea:z._loads.ventPerArea,
+          // v12.11 — parámetros del control por temperatura
+          ventTset:z._loads.ventTset, ventBanda:z._loads.ventBanda,
+          ventDTmin:z._loads.ventDTmin, ventTeMin:z._loads.ventTeMin,
+          ventACHmax:z._loads.ventACHmax,
           infiltACH:z._loads.infiltACH,   infiltWindSens:z._loads.infiltWindSens,
           schedOcc:   z._loads.schedOcc  ? u8ToB64(new Uint8Array(z._loads.schedOcc.buffer))  : null,
           schedLight: z._loads.schedLight? u8ToB64(new Uint8Array(z._loads.schedLight.buffer)): null,
@@ -27346,7 +27487,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.10.1
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.11
   </div>
 </div>
 <script>
@@ -29032,7 +29173,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.10.1</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.11</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -29111,6 +29252,49 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Cambios en v12.11</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Ventilación controlada por temperatura.</strong> Los tres
+          métodos anteriores —renovaciones/h, L/s por persona, L/s por m²— fijan un caudal y lo modulan
+          solo por horario. El reloj decide cuándo se ventila. Eso describe bien un sistema mecánico,
+          pero no lo que gobierna un edificio en régimen libre: nadie abre la ventana a una hora, la
+          abre cuando hace calor dentro y fuera está más fresco.
+          <br><br>
+          La consecuencia era que no existía una respuesta correcta. Medido sobre una vivienda real en
+          Bogotá: con el horario del proyecto el pico llegaba a 42,0 °C y 412 horas por encima de 30 °C;
+          ventilar 6 ren/h de 08 a 18 h quitaba todas esas horas de calor pero multiplicaba por siete
+          las horas por debajo de 16 °C, de 168 a 1.165. O sobrecalentaba o sobreenfriaba, según la hora.
+          <br><br>
+          El nuevo método <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Por temperatura (ventana operable)</span> abre con tres
+          condiciones, todas en rampa para que no oscile de abierto a cerrado entre un paso y el
+          siguiente: cuánto calor sobra dentro (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Ti − Tset</span> sobre la banda
+          proporcional), si el aire exterior ayuda (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Ti − Te</span> por encima del ΔT
+          mínimo) y que fuera no esté helado. <b>El horario cambia de papel</b>: deja de ser «cuándo se
+          ventila» y pasa a ser «cuándo se puede abrir» — presencia, seguridad, lluvia.
+          <br><br>
+          Sobre la misma vivienda, con umbral 24 °C y 6 ren/h de abertura máxima: pico de
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">42,0 → 29,4 °C</span>, horas sobre 30 °C de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">412 → 0</span>, y
+          horas bajo 16 °C de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">168 → 231</span>. El mismo control del pico que el horario
+          fijo de 6 ren/h, con <b>cinco veces menos horas frías</b>. Esa es exactamente la diferencia
+          entre ventilar por reloj y ventilar por temperatura.
+          <br><br>
+          La temperatura interior que lee el control es la del principio del paso, no la que se está
+          resolviendo. No es una concesión numérica: un termostato real también mide el presente y actúa
+          sobre el futuro inmediato. Con los sub-pasos por defecto el desfase es de 20 minutos.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Las renovaciones se calculan ahora en un solo sitio.</strong>
+          Había tres copias de esa cuenta —el solver, el balance pre-solver y el diagnóstico de
+          ventilación excesiva— y añadir un método nuevo habría obligado a tocar las tres y a
+          mantenerlas sincronizadas a mano. Como ya ocurrió con la irradiancia en v12.8, se unificó
+          antes de ampliar: todas llaman a <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">achVentilacion()</span>.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El panel de zona ya no oculta que el horario multiplica
+          el caudal.</strong> El recuadro decía «Total renovaciones/h» mostrando
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">infiltración + ventilación</span>, que es el valor solo en las horas en que el
+          horario está al 100 %. Con el perfil de oficina que viene por defecto, teclear 1 ren/h daba
+          entre 0,6 y 1,5 según la hora, y 113 de las 168 horas de la semana quedaban por debajo de 1.
+          Ahora el recuadro dice «horario al 100 %» y advierte de la modulación; en modo por temperatura
+          muestra el rango real, de cerrada a abierta.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Cambios en v12.10</div>
