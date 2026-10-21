@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.9</title>
+<title>BioSim v12.10.1</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.9</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.10.1</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyecto()" style="font-weight:700" title="Sobrescribe el archivo del proyecto sin preguntar. La primera vez pide dónde guardarlo.">💾 Guardar proyecto <span style="float:right;opacity:.55;font-weight:400">Ctrl+S</span></a>
@@ -4899,8 +4899,8 @@ canvas#cv{display:block;}
       <div class="bbody" id="bPerfil">
         <div class="chart-scroll-wrap">
         <div style="display:flex;align-items:center;gap:6px;padding:3px 6px;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap">
-          <span style="font-size:.6rem;color:var(--text3);font-family:var(--font-mono)">⏱ Perfil medio horario (0–23 h) — temperatura promedio por hora del día · Área = rango T_min/T_max por hora</span>
-          <div style="margin-left:auto;display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+          <span style="font-size:.6rem;color:var(--text3);font-family:var(--font-mono)">⏱ Perfil medio horario (0–23 h) — cada punto es la <b>media</b> de esa hora en todos los días del período: 365 valores en «Anual», ~30 en un mes, <b>1 en un día</b> · Área = mín/máx de esa hora · Por eso un día concreto suele superar la curva anual: no se sobrecalienta, es el mismo cálculo sin el alisado de promediar 365 días</span>
+          <div class="no-print" style="margin-left:auto;display:flex;align-items:center;gap:4px;flex-wrap:wrap">
             <span style="font-size:.6rem;color:var(--text3);font-family:var(--font-mono)">Período:</span>
             <button class="btn btn-a btn-xs ppf-per" id="ppfPerAnual" onclick="setPPFPeriod('anual',this)">Anual</button>
             <button class="btn btn-g btn-xs ppf-per" onclick="setPPFPeriod(0,this)">Ene</button>
@@ -5647,7 +5647,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.9 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.10.1 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -6085,6 +6085,96 @@ let surfaces=[],zones=[],layers=[];
 let sel=new Set();
 let activeZone=null, activeTool='sel';
 let epwT=[],epwDN=[],epwDH=[],epwWS=[],epwDP=[];
+
+// ══════════════════════════════════════════════════════════════════════
+//  v12.10 — T_rm: TEMPERATURA EXTERIOR MEDIA PREDOMINANTE (ASHRAE 55)
+//
+//  Hasta v12.9 cada sitio que dibujaba la banda de confort calculaba su
+//  propio T_rm, y ninguno era el de la norma. Había tres recetas
+//  distintas conviviendo:
+//    · perfil horario, informe de temporada y balance de temporada:
+//      media de Te sobre el PERÍODO GRAFICADO. Para un solo día, la media
+//      de ese mismo día.
+//    · ashrae55Limits(): media de Te del MES. El comentario decía «running
+//      mean of monthly means», pero el código era la media del mes a secas.
+//
+//  Ninguna es la definición. ASHRAE 55-2020 §5.4.2 define T_pma(out) como
+//  la media aritmética de las medias diarias exteriores de entre 7 y 30
+//  días SECUENCIALES ANTERIORES al día en cuestión. El matiz importa: la
+//  banda adaptativa modela la aclimatación de los ocupantes, que depende
+//  del tiempo que han vivido ANTES, no del que hace mientras se les mide.
+//  Con la receta vieja, cambiar de pestaña movía la banda de confort — y
+//  un criterio de confort que depende de qué gráfico estés mirando no es
+//  un criterio.
+//
+//  Aquí se usan 7 días, el mínimo de la norma y el más reactivo. El año
+//  se trata como cíclico: el predecesor del 1 de enero es el 31 de
+//  diciembre. Un EPW es un año tipo, no una serie real, así que enlazar
+//  el final con el principio es más fiel que recortar la ventana en
+//  enero, que dejaría los primeros días con menos historia que el resto.
+// ══════════════════════════════════════════════════════════════════════
+const TRM_DIAS = 7;
+let _trmCache = null;        // Float64Array(365) con T_rm de cada día
+let _trmMediasDia = null;    // Float64Array(365) con la media diaria de Te
+
+function invalidarTrm(){ _trmCache = null; _trmMediasDia = null; }
+
+function _construirTrm(){
+  if(_trmCache) return _trmCache;
+  if(!epwT || epwT.length < 8760) return null;
+  const md = new Float64Array(365);
+  for(let d = 0; d < 365; d++){
+    let s = 0, n = 0;
+    for(let h = 0; h < 24; h++){
+      const v = epwT[d*24 + h];
+      if(isFinite(v)){ s += v; n++; }
+    }
+    md[d] = n > 0 ? s/n : 20;
+  }
+  const rm = new Float64Array(365);
+  for(let d = 0; d < 365; d++){
+    let s = 0;
+    for(let k = 1; k <= TRM_DIAS; k++) s += md[(d - k + 365) % 365];
+    rm[d] = s / TRM_DIAS;
+  }
+  _trmMediasDia = md;
+  _trmCache = rm;
+  return rm;
+}
+
+// T_rm del día indicado (índice 0..364).
+function trmDia(doy){
+  const rm = _construirTrm();
+  if(!rm) return 20;
+  return rm[((doy % 365) + 365) % 365];
+}
+
+// T_rm representativo de un rango de horas absolutas: media de los T_rm
+// diarios de los días que toca. Para un solo día devuelve su propio T_rm.
+function trmRango(h0, h1){
+  const rm = _construirTrm();
+  if(!rm) return 20;
+  const d0 = Math.floor(Math.max(0, h0) / 24);
+  const d1 = Math.floor(Math.min(8759, h1) / 24);
+  let s = 0, n = 0;
+  for(let d = d0; d <= d1; d++){ s += rm[d % 365]; n++; }
+  return n > 0 ? s/n : 20;
+}
+
+// T_rm representativo de una lista de horas absolutas (los informes de
+// temporada trabajan con listas, no con rangos contiguos).
+function trmHoras(horas){
+  const rm = _construirTrm();
+  if(!rm || !horas || !horas.length) return 20;
+  const vistos = new Set();
+  let s = 0, n = 0;
+  for(const h of horas){
+    const d = Math.floor(h/24) % 365;
+    if(vistos.has(d)) continue;
+    vistos.add(d); s += rm[d]; n++;
+  }
+  return n > 0 ? s/n : 20;
+}
 let epwAlt = 0;                      // v11.0: altitud del emplazamiento (m)  // EPW arrays: Temp, DirectNormal, DiffuseHoriz, WindSpeed
 let results=[];
 let chartA=null,chartC=null,chartP=null;
@@ -18120,7 +18210,7 @@ document.getElementById('fEPW').addEventListener('change',e=>{
   const reader=new FileReader();
   reader.onload=ev=>{
     const lines=ev.target.result.split('\n');
-    epwT=[]; epwDN=[]; epwDH=[]; epwWS=[]; epwDP=[];
+    epwT=[]; epwDN=[]; epwDH=[]; epwWS=[]; epwDP=[]; invalidarTrm();
     // ── Extraer lat/lon/ciudad de la línea 1 (LOCATION) ──
     if(lines[0]){
       const loc=lines[0].split(',');
@@ -18190,7 +18280,7 @@ document.getElementById('fEPW').addEventListener('change',e=>{
 });
 
 function cargarDemoEPW(){
-  epwT=[]; epwDN=[]; epwDH=[]; epwWS=[]; epwDP=[];
+  epwT=[]; epwDN=[]; epwDH=[]; epwWS=[]; epwDP=[]; invalidarTrm();
   for(let h=0;h<8760;h++){
     const d=h/24, hr=h%24;
     epwT.push(18-10*Math.cos(2*Math.PI*d/365)+6*Math.sin(Math.PI*hr/12-Math.PI/3)+(Math.random()-.5));
@@ -19948,14 +20038,12 @@ function _cibseHourBalance(h,T,Te,I,IDN,IDH,zIds,N,H,Q,surfParams,zMap,GT,inf,rh
 // v6.2: fuerza simulación de año completo independiente del selector de período.
 // Es el disparador del botón azul "Simular Año" del panel izquierdo. El selector
 // de período de la pestaña Simulación ya no afecta este botón.
+// v12.10 — Antes esta función guardaba _simPeriod, lo forzaba a 'year' y
+// lo restauraba al terminar, para blindarse de un selector de período que
+// ya no existía. Eliminado ese selector, simular() es siempre anual y
+// este envoltorio solo queda por compatibilidad con el botón y el menú.
 async function simularAnual(){
-  const prev = _simPeriod;
-  _simPeriod = 'year';   // forzar año completo
-  try {
-    await simular();
-  } finally {
-    _simPeriod = prev;   // restaurar el modo elegido por el usuario
-  }
+  await simular();
 }
 
 async function simular(){
@@ -21391,12 +21479,10 @@ function _renderSeasonHourlyChart(){
     if(!isFinite(teMax[h])) teMax[h]=null;
   }
 
-  // Banda ASHRAE 55 — usar T_rm del período (igual que el panel de confort)
-  let teSum=0, teCnt=0;
-  for(const hAbs of snap.periodHours){
-    const v = epwT[hAbs]; if(isFinite(v)){ teSum+=v; teCnt++; }
-  }
-  const Trm = teCnt>0 ? teSum/teCnt : 20;
+  // v12.10 — Banda ASHRAE 55 con el T_rm de la norma: media de las medias
+  // diarias de los 7 días ANTERIORES a cada día del período, promediada
+  // sobre el período. Antes era la media de Te del propio período.
+  const Trm = trmHoras(snap.periodHours);
   const Tneu = 0.31*Trm + 17.8;
   const b80_lo = new Array(24).fill(Tneu - 3.5);
   const b80_hi = new Array(24).fill(Tneu + 3.5);
@@ -21619,13 +21705,8 @@ function _renderSeasonConfort(){
 
   const snap = _seasonSnap;
 
-  // T_rm del período: media de Te del período
-  let teSum = 0, teCnt = 0;
-  for(const hAbs of snap.periodHours){
-    const v = epwT[hAbs];
-    if(isFinite(v)){ teSum += v; teCnt++; }
-  }
-  const Trm = teCnt > 0 ? teSum/teCnt : 20;
+  // v12.10 — T_rm de la norma (ver invalidarTrm / trmHoras)
+  const Trm = trmHoras(snap.periodHours);
   const Tneu = 0.31 * Trm + 17.8;
   const b80_lo = Tneu - 3.5, b80_hi = Tneu + 3.5;
   const b90_lo = Tneu - 2.5, b90_hi = Tneu + 2.5;
@@ -22044,6 +22125,29 @@ function graficarPerfil(){
     }
   }
 
+  // v12.10.1 — Cuántos DÍAS entran en cada punto del perfil.
+  //
+  // El promedio es siempre el mismo código: para cada hora del día se
+  // juntan los valores de esa hora en todos los días del período y se
+  // promedian. Lo único que cambia es cuántos valores caen en cada cubo:
+  //   · período anual → 365 por cubo, uno por día;
+  //   · un mes        → 28 a 31;
+  //   · un día        → EXACTAMENTE UNO, y la media de un solo valor es
+  //                     ese valor, así que la curva es la traza literal.
+  //
+  // Consecuencia observable y comprobada: en modo día la banda mín/máx
+  // colapsa sobre la línea (ancho 0,00 K), mientras que en anual llega a
+  // 5,4 K en este modelo. Esa es la diferencia que hace que un día
+  // concreto parezca «sobrecalentarse» frente al año: no es otro cálculo,
+  // es el mismo sin el alisado que introduce promediar 365 días.
+  //
+  // Aparte de esto, cada valor de results[] ya es la media de los
+  // sub-pasos de su hora (3 por defecto), en todos los modos por igual.
+  const _nDiasPerfil = Math.max(1, Math.round((h1abs - h0abs + 1) / 24));
+  const _sufijoMedia = _nDiasPerfil > 1
+    ? `media de ${_nDiasPerfil} días`
+    : '1 día · un valor por hora';
+
   const avg = arr => arr.length>0 ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
   const mn  = arr => arr.length>0 ? safeMin(arr) : null;
   const mx  = arr => arr.length>0 ? safeMax(arr) : null;
@@ -22074,11 +22178,12 @@ function graficarPerfil(){
   }
   const mrtMean = mrtHour.map(zh=>zh.map(avg));
 
-  // ── ASHRAE 55 comfort band for the period ────────────────────────
-  // Use the mean outdoor temperature of the selected period as T_rm
-  const Te_flat=[];
-  for(let hr=h0abs;hr<=h1abs;hr++){ if(isFinite(epwT[hr])) Te_flat.push(epwT[hr]); }
-  const Trm = Te_flat.length>0 ? Te_flat.reduce((a,b)=>a+b,0)/Te_flat.length : 20;
+  // ── Banda de confort ASHRAE 55 del período ───────────────────────
+  // v12.10 — T_rm de la norma: media de las medias diarias de los 7 días
+  // ANTERIORES. Antes se usaba la media de Te del propio período, que
+  // para un solo día era la media de ese mismo día: la banda se movía al
+  // cambiar de pestaña, cosa que la norma no contempla.
+  const Trm = trmRango(h0abs, h1abs);
   let band80min=20, band80max=26, band90min=21, band90max=25;
   if(Trm>=10 && Trm<=33.5){
     const Tneu=0.31*Trm+17.8;
@@ -22126,7 +22231,7 @@ function graficarPerfil(){
     borderColor:'rgba(68,102,180,0.18)',borderWidth:0,
     pointRadius:0,fill:'+2',backgroundColor:'rgba(68,102,180,0.07)',tension:0.4,order:12});
   datasets.push({
-    label:'Te exterior (EPW)',data:epwMean,
+    label:`Te exterior (EPW) · ${_sufijoMedia}`,data:epwMean,
     borderColor:'#4466cc',borderWidth:2,
     borderDash:[],       // continua
     pointRadius:0,fill:false,tension:0.4,order:10
@@ -22158,7 +22263,7 @@ function graficarPerfil(){
     });
     // Ta: línea DISCONTINUA en color de zona (consistente con chart anual)
     datasets.push({
-      label:`Ta ${tz?.name||'Z'+(zi+1)} (${periodLabel})`,
+      label:`Ta ${tz?.name||'Z'+(zi+1)} · ${_sufijoMedia}`,
       data:zoneMean[zi],
       borderColor:col,borderWidth:2.0,
       borderDash:[6,3],   // ← Ta = discontinua
@@ -22172,7 +22277,7 @@ function graficarPerfil(){
     // MRT: línea CONTINUA en color de zona (más gruesa para destacar)
     if(mrtMean[zi] && mrtMean[zi].some(v=>v!=null)){
       datasets.push({
-        label:`MRT ${tz?.name||'Z'+(zi+1)}`,
+        label:`MRT ${tz?.name||'Z'+(zi+1)} · ${_sufijoMedia}`,
         data:mrtMean[zi],
         borderColor:col,borderWidth:2.4,
         // sin borderDash → continua
@@ -22215,7 +22320,9 @@ function graficarPerfil(){
           filter:item=>!item.text.startsWith('_')
         }},
         title:{display:true,
-          text:`📅 Perfil horario — ${periodLabel} · Ta (- - -) y MRT (—) por zona · T_rm=${Trm.toFixed(1)}°C · T_neu=${(0.31*Trm+17.8).toFixed(1)}°C`,
+          text: _nDiasPerfil > 1
+            ? `📅 Perfil horario — ${periodLabel} · MEDIA de ${_nDiasPerfil} días (el área es el mín/máx de cada hora) · T_rm=${Trm.toFixed(1)}°C · T_neu=${(0.31*Trm+17.8).toFixed(1)}°C`
+            : `📅 Perfil horario — ${periodLabel} · 1 día: un valor por hora, sin más días que promediar (la banda mín/máx colapsa sobre la línea) · T_rm=${Trm.toFixed(1)}°C · T_neu=${(0.31*Trm+17.8).toFixed(1)}°C`,
           color:'#4a5470',font:{size:10,family:'JetBrains Mono',weight:'bold'}},
         tooltip:{
           callbacks:{
@@ -22320,15 +22427,19 @@ function occScopeLabel(mask){
 // ── ASHRAE 55-2010 Adaptive Comfort Model ────────────────────────────────
 // T_op_neu = 0.31 * T_rm + 17.8  (neutral operative temperature)
 // Acceptable range 80%: ±3.5°C | 90%: ±2.5°C
-// T_rm = prevailing mean outdoor temperature (running mean of monthly means)
+// T_rm = temperatura exterior media predominante. v12.10: media de las
+//        medias diarias de los 7 días ANTERIORES (ASHRAE 55-2020 §5.4.2).
+//        Hasta v12.9 esta línea decía «running mean of monthly means»
+//        pero el código usaba la media del mes a secas.
 // Applies when T_rm is 10–33.5°C; outside this range, use static 18-26°C fallback
 function ashrae55Limits(monthIdx){
   const dias=[31,28,31,30,31,30,31,31,30,31,30,31];
-  // Monthly mean outdoor temperature from EPW
   let h0=0;
   for(let i=0;i<monthIdx;i++) h0+=dias[i]*24;
-  const slc=epwT.slice(h0, h0+dias[monthIdx]*24);
-  const Trm=slc.length>0 ? slc.reduce((a,b)=>a+b,0)/slc.length : 20;
+  // v12.10 — Media de los T_rm diarios del mes. Antes era la media de Te
+  // del mes a secas, pese a que el comentario de esta misma función decía
+  // «running mean of monthly means».
+  const Trm = trmRango(h0, h0 + dias[monthIdx]*24 - 1);
 
   if(Trm<10||Trm>33.5){
     // Outside adaptive model applicability: use ASHRAE static PMV ±0.5 zone (~20-26°C)
@@ -22551,7 +22662,8 @@ function graficarC(){
     ];
   }).flat();
 
-  const annualTrm=(epwT.reduce((a,b)=>a+b,0)/epwT.length).toFixed(1);
+  // v12.10 — media de los 365 T_rm diarios, no la media bruta del EPW.
+  const annualTrm = trmRango(0, 8759).toFixed(1);
 
   chartC=new Chart(document.getElementById('cConf'),{
     type:'bar',
@@ -23177,7 +23289,8 @@ function mostrarStats(){
 
   html+='</table>';
   html+=`<div style="font-size:.58rem;color:var(--text3);margin-top:6px;font-family:var(--font-mono)">
-    ASHRAE 55-2010 §5.4 · T_neu = 0.31·T_rm + 17.8°C · 80%: ±3.5°C · 90%: ±2.5°C · aplicable T_rm 10–33.5°C
+    ASHRAE 55 §5.4 · T_neu = 0.31·T_rm + 17.8°C · 80%: ±3.5°C · 90%: ±2.5°C · aplicable T_rm 10–33.5°C
+    · T_rm = media de las medias diarias exteriores de los 7 días anteriores (v12.10)
   </div>`;
 
   document.getElementById('statHtml').innerHTML=html;
@@ -26128,6 +26241,7 @@ function _cargarProyectoData(proj){
       epwDH = dec(proj.epw.DH);
       epwWS = dec(proj.epw.WS);
       epwDP = proj.epw.DP ? dec(proj.epw.DP) : [];   // v11.0: puede faltar en proyectos antiguos
+      invalidarTrm();   // v12.10: el clima cambió, los T_rm diarios también
       epwMeta = proj.epw.meta || null;
       if(epwMeta && isFinite(epwMeta.alt)) epwAlt = epwMeta.alt;
       if(epwMeta){
@@ -26140,7 +26254,7 @@ function _cargarProyectoData(proj){
           `8760 h · T∈[${safeMin(epwT).toFixed(1)}, ${safeMax(epwT).toFixed(1)}]°C. ` +
           `No hace falta volver a cargar el archivo EPW.`, 'ok');
     }catch(err){
-      epwT=[]; epwDN=[]; epwDH=[]; epwWS=[]; epwMeta=null;
+      epwT=[]; epwDN=[]; epwDH=[]; epwWS=[]; epwMeta=null; invalidarTrm();
       _epwRefreshUI();
       log('El clima guardado en el proyecto no se pudo leer. Carga el EPW manualmente.','err');
     }
@@ -27071,8 +27185,15 @@ function exportarInformePDF(){
     } else { cv.remove(); }
   });
 
-  // Eliminar botones
-  clone.querySelectorAll('button').forEach(b=>b.remove());
+  // ── Quitar los controles de la interfaz ───────────────────────────
+  // v12.10 — Antes solo se borraban los <button>. Los <select> y <input>
+  // sobrevivían como widgets muertos, y las etiquetas que los acompañan
+  // («Período:», «Día:») quedaban sueltas en el informe, encabezándolo
+  // con dos palabras y nada detrás. Ahora se retira el grupo de control
+  // completo —marcado con .no-print— y, como red de seguridad, cualquier
+  // control suelto que quedara fuera de un grupo marcado.
+  clone.querySelectorAll('.no-print').forEach(e=>e.remove());
+  clone.querySelectorAll('button, select, input, textarea').forEach(b=>b.remove());
 
   const body=clone.innerHTML;
 
@@ -27225,7 +27346,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.9
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.10.1
   </div>
 </div>
 <script>
@@ -28519,41 +28640,27 @@ function resetRadColormap(){
 }
 
 
-// ─── Simulation period selector ──────────────────────────────────
-let _simPeriod = 'year';  // 'year' | 'range' | 'day'
-
-function simSetPeriod(p, btn){
-  _simPeriod = p;
-  document.querySelectorAll('#simPer0,#simPer1,#simPer2').forEach(b=>b&&b.classList.remove('act-proj'));
-  if(btn) btn.classList.add('act-proj');
-  const ri=document.getElementById('simRangeInputs');
-  const di=document.getElementById('simDayInputs');
-  if(ri) ri.style.display = p==='range'?'block':'none';
-  if(di) di.style.display = p==='day'?'block':'none';
-  const rb=document.getElementById('bSimRun');
-  if(rb) rb.textContent = p==='year'?'▶ Simular año completo (8760 h)':
-                           p==='day' ?'▶ Simular día':'▶ Simular período';
-}
-
-// Helper: get DOY range from period selector
+// ─── Rango simulado ──────────────────────────────────────────────
+//
+// v12.10 — Aquí vivía un selector de período de simulación: _simPeriod
+// podía valer 'year', 'day' o 'range', simSetPeriod() lo cambiaba y
+// simGetDOYRange() leía <select id="simDayMo">, <input id="simFromDay">
+// y compañía para acotar el cálculo.
+//
+// Todo eso estaba muerto, y de una forma que podía morder. Los elementos
+// que leía no existen en el documento desde la v6.2, cuando el análisis
+// por período se trasladó a la pestaña Temporadas; simSetPeriod() no se
+// invocaba desde ningún sitio; y, de haberse restaurado esos controles,
+// la función habría reetiquetado el botón de simular a «▶ Simular día»
+// mientras ese mismo botón llama a simularAnual(), que fuerza el año
+// completo. Es decir: el botón habría mentido.
+//
+// BioSim simula SIEMPRE las 8760 horas. El recorte por día, mes o
+// temporada es posterior y se hace sobre los resultados ya calculados,
+// sin volver a simular — justamente para que un día y el año provengan
+// del mismo cálculo y sean comparables.
 function simGetDOYRange(){
-  const DIAS=[31,28,31,30,31,30,31,31,30,31,30,31];
-  const doyStart=[0,31,59,90,120,151,181,212,243,273,304,334];
-  if(_simPeriod==='year') return {h0:0, h1:8759};
-  if(_simPeriod==='day'){
-    const mo=parseInt(document.getElementById('simDayMo')?.value||0);
-    const d=Math.max(1,Math.min(DIAS[mo],parseInt(document.getElementById('simDayD')?.value||1)));
-    const doy=doyStart[mo]+d-1;
-    return {h0:doy*24, h1:doy*24+23};
-  }
-  // range
-  const mo0=parseInt(document.getElementById('simFromMo')?.value||0);
-  const d0=Math.max(1,Math.min(DIAS[mo0],parseInt(document.getElementById('simFromDay')?.value||1)));
-  const mo1=parseInt(document.getElementById('simToMo')?.value||11);
-  const d1=Math.max(1,Math.min(DIAS[mo1],parseInt(document.getElementById('simToDay')?.value||31)));
-  const doy0=doyStart[mo0]+d0-1;
-  const doy1=doyStart[mo1]+d1-1;
-  return {h0:Math.max(0,doy0)*24, h1:Math.min(364,doy1)*24+23};
+  return { h0: 0, h1: 8759 };
 }
 
 // ─── Steps selector ─────────────────────────────────────────────
@@ -28925,7 +29032,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.9</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.10.1</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -29004,6 +29111,65 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Cambios en v12.10</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El perfil horario no decía que era una media, y se
+          leía como una envolvente.</strong> La serie se llamaba «Ta ZONA (Anual)», que suena a <i>la
+          temperatura del año</i>. En realidad cada punto de esa curva es la media de los 365 valores de
+          esa hora del día, y promediar 365 curvas aplana los picos: medido sobre un modelo real,
+          <b>209 de 365 días tienen un pico por encima del pico del perfil medio</b>. De ahí la impresión
+          de que al graficar un día concreto el edificio «se sobrecalienta» — no se sobrecalienta, es el
+          mismo cálculo con un número distinto de días por punto. Ahora las series dicen «media de 365
+          días», «media de 31 días» o «1 día · un valor por hora» según toque, y el título del gráfico lo
+          repite junto con el recordatorio de que el área sombreada es el mín/máx de cada hora.
+          <br><br>
+          <b>Matiz, porque la primera redacción de esta nota decía «sin promediar» y era impreciso:</b> el
+          promedio se ejecuta siempre, es el mismo código en los tres casos. Lo único que cambia es
+          cuántos valores caen en cada cubo horario — 365, unos 30, o uno. La media de un solo valor es
+          ese valor, de modo que en modo día la curva coincide con la traza literal de la simulación y la
+          banda mín/máx colapsa sobre la línea (ancho 0,00 K, comprobado; en anual llega a 5,4 K). Aparte
+          de eso, cada valor horario ya es la media de los sub-pasos de su hora —tres por defecto— en
+          todos los modos por igual.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">T_rm ahora es el de la norma.</strong> La banda de
+          confort adaptativo de ASHRAE 55 se apoya en T_pma(out), la temperatura exterior media
+          predominante, que la norma (55-2020 §5.4.2) define como la media de las medias diarias de entre
+          7 y 30 días <b>anteriores</b> al día evaluado. BioSim no usaba eso: había tres recetas distintas
+          conviviendo. El perfil horario y los informes de temporada tomaban la media de Te del
+          <i>período graficado</i> —para un solo día, la media de ese mismo día—, y
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ashrae55Limits()</span> tomaba la media del mes, pese a que su propio comentario
+          decía «running mean of monthly means».
+          <br><br>
+          El matiz no es formal: la banda adaptativa modela la aclimatación de los ocupantes, que depende
+          del tiempo que han vivido <b>antes</b>, no del que hace mientras se les mide. Con la receta
+          vieja, cambiar de pestaña movía el criterio de confort, y un criterio que depende de qué
+          gráfico estés mirando no es un criterio. Ahora hay una sola función, con ventana de 7 días (el
+          mínimo de la norma, el más reactivo) y el año tratado como cíclico: el predecesor del 1 de
+          enero es el 31 de diciembre, que para un año tipo es más fiel que recortar la ventana en enero.
+          <br><br>
+          Medido con el EPW de Cali: en el año y en los meses apenas cambia nada —el T_rm anual sale
+          idéntico, 24,74 °C, y la T neutra mensual se mueve ±0,04 °C—, porque la media de los 365 T_rm
+          diarios equivale a la media anual. Donde sí cambia es en los días sueltos, que es justo donde
+          la receta vieja era más incorrecta: hasta <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">3,5 °C</span> de diferencia en T_rm
+          en el peor día del año, es decir <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">1,1 °C</span> en la temperatura neutra y en
+          toda la banda.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Se eliminó un selector de período de simulación que
+          estaba muerto.</strong> <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">_simPeriod</span> podía valer «year», «day» o «range»,
+          y <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">simGetDOYRange()</span> leía controles para acotar el cálculo. Esos
+          controles no existen en el documento desde la v6.2 y
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">simSetPeriod()</span> no se llamaba desde ningún sitio, así que era inerte —
+          pero de haberse restaurado habría reetiquetado el botón a «▶ Simular día» mientras ese mismo
+          botón llama a <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">simularAnual()</span>, que fuerza el año completo. El botón
+          habría mentido. BioSim simula siempre las 8760 horas; el recorte por día, mes o temporada se
+          hace después, sobre los resultados ya calculados, para que un día y el año provengan del mismo
+          cálculo y sean comparables.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Los informes imprimían controles de interfaz.</strong>
+          Al exportar, el clon del panel solo borraba los <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">&lt;button&gt;</span>. Los
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">&lt;select&gt;</span> y <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">&lt;input&gt;</span> sobrevivían como
+          widgets muertos, y las etiquetas que los acompañan quedaban sueltas: el PDF del perfil horario
+          empezaba con «Período:» y «Día:» y nada detrás. Ahora el grupo de controles va marcado como no
+          imprimible y se retira entero, con una pasada de seguridad para cualquier control suelto.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Cambios en v12.9</div>
@@ -29539,7 +29705,7 @@ function mostrarAyudaTemporadas(){
         <li style="margin-bottom:6px"><strong>Resumen térmico por zona</strong>: T mín, T máx, T media y amplitud (Δ) para cada zona durante el período. Estos valores difieren de los anuales porque solo agregan las horas del período.</li>
         <li style="margin-bottom:6px"><strong>Balance energético</strong>: dos cajas paralelas con ganancias (rojo) y pérdidas (azul) por categoría (Muros, Cubierta, Piso, Acristalamiento, Ventilación, Equipos, Personas, Iluminación). Cada barra muestra kWh acumulados y porcentaje. El balance neto indica si el período es dominado por ganancias o pérdidas.</li>
         <li style="margin-bottom:6px"><strong>Perfil de temperaturas diarias</strong>: temperatura media de cada día del período. Permite ver tendencias a lo largo del trimestre. Banda verde = confort ASHRAE 55, área azul = envolvente de la Te exterior.</li>
-        <li style="margin-bottom:6px"><strong>Perfil horario promedio (24h)</strong>: promedio de cada una de las 24 horas del día sobre todo el período. Muestra el comportamiento típico de un día representativo del trimestre — útil para evaluar oscilación diurna, rezago térmico e inercia.</li>
+        <li style="margin-bottom:6px"><strong>Perfil horario promedio (24h)</strong>: promedio de cada una de las 24 horas del día sobre todo el período. Muestra el comportamiento típico de un día representativo del trimestre — útil para evaluar oscilación diurna, rezago térmico e inercia. <b>Es una media, no una envolvente</b>: al promediar muchos días los picos se aplanan, de modo que un día concreto graficado aparte suele superarla (medido: 209 de 365 días). Para leer los extremos está el área sombreada, que es el mín/máx de cada hora.</li>
         <li><strong>Confort adaptativo</strong>: porcentaje de horas en bandas 80% y 90% ASHRAE 55, además del predominio de frío vs calor cuando no se alcanza confort. T_rm se calcula con la Te del período, no del año completo.</li>
       </ul>
 
