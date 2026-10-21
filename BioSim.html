@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.8</title>
+<title>BioSim v12.9</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,11 +4129,12 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.8</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.9</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
-      <a onclick="guardarProyectoAs(event)" style="font-weight:700">💾 Guardar proyecto como...</a>
-      <a onclick="cargarProyecto()" style="font-weight:700">📂 Abrir proyecto...</a>
+      <a onclick="guardarProyecto()" style="font-weight:700" title="Sobrescribe el archivo del proyecto sin preguntar. La primera vez pide dónde guardarlo.">💾 Guardar proyecto <span style="float:right;opacity:.55;font-weight:400">Ctrl+S</span></a>
+      <a onclick="guardarProyectoAs(event)">💾 Guardar proyecto como... <span style="float:right;opacity:.55;font-weight:400">Ctrl+Mayús+S</span></a>
+      <a onclick="cargarProyecto()" style="font-weight:700">📂 Abrir proyecto... <span style="float:right;opacity:.55;font-weight:400">Ctrl+O</span></a>
       <hr>
       <a onclick="document.getElementById('fEPW').click()">📂 Abrir archivo EPW...</a>
       <a onclick="document.getElementById('fMOD').click()" title="Reemplaza el modelo existente. Pregunta por las unidades y el eje vertical del archivo antes de importar.">📂 Abrir Modelo 3D (reemplazar)...</a>
@@ -4221,6 +4222,7 @@ canvas#cv{display:block;}
   <div class="menu-item">Ayuda
     <div class="menu-dropdown">
       <a onclick="mostrarAcercaDeNuevo()">ℹ Acerca de BioSim</a>
+      <a onclick="mostrarDiagnostico()" title="Estado de WebGL y del entorno de ejecución">🩺 Diagnóstico del entorno</a>
       <a onclick="mostrarAyudaTemporadas()">🌗 Análisis por Temporadas</a>
       <hr>
       <a onclick="mostrarAcercaDe()">📖 Manual técnico completo</a>
@@ -4244,6 +4246,13 @@ canvas#cv{display:block;}
 
 <!-- TOOLBAR -->
 <div id="toolbar">
+  <!-- v12.9: GUARDAR — sobrescribe el proyecto sin diálogo -->
+  <span class="tb-grp">ARCH</span>
+  <button class="tb-btn btn-g" id="bGuardar" data-tip="Guardar proyecto (Ctrl+S)" onclick="guardarProyecto()">
+    <svg viewBox="0 0 16 16"><path d="M2.5 2.5h8.2L13.5 5.3v8.2h-11z"/><path d="M5 2.5h5.5v3.6H5z"/><path d="M4.5 9h7v4.5h-7z"/></svg>
+  </button>
+  <span id="archivoActual" style="font-size:.6rem;font-family:var(--font-mono);color:var(--text3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+  <div class="tb-sep"></div>
   <!-- DESHACER / REHACER -->
   <span class="tb-grp">HIST</span>
   <button class="tb-btn" id="tUNDO" data-tip="Deshacer (Ctrl+Z)" onclick="_undoPop()" style="position:relative">
@@ -5638,7 +5647,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.8 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.9 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -6361,6 +6370,8 @@ function init3D(){
 
   // Keyboard shortcuts
   window.addEventListener('keydown', onKey, false);
+  // v12.9: estado inicial del botón Guardar (sin archivo asociado todavía)
+  try{ _actualizarEstadoGuardado(); }catch(e){}
 
   // Resize
   const ro=new ResizeObserver(()=>onResize());
@@ -6863,6 +6874,19 @@ function onWH(e){
 }
 
 function onKey(e){
+  // v12.9 — Ctrl+S guardar · Ctrl+Mayús+S guardar como · Ctrl+O abrir.
+  // Van antes que nada: son los atajos que el usuario espera de cualquier
+  // aplicación y no deben depender del estado de las herramientas. En la
+  // app de escritorio hay además que interceptarlos para que Chromium no
+  // abra su propio «Guardar página como».
+  if((e.ctrlKey||e.metaKey) && (e.key==='s'||e.key==='S')){
+    e.preventDefault();
+    if(e.shiftKey) guardarProyectoAs(); else guardarProyecto();
+    return;
+  }
+  if((e.ctrlKey||e.metaKey) && !e.shiftKey && (e.key==='o'||e.key==='O')){
+    e.preventDefault(); cargarProyecto(); return;
+  }
   // Ctrl+Z = deshacer
   if((e.ctrlKey||e.metaKey) && !e.shiftKey && (e.key==='z'||e.key==='Z')){
     e.preventDefault();
@@ -25652,8 +25676,6 @@ function generarInforme(){
 //  PROJECT SAVE / LOAD  (Fix 5 — session persistence)
 // ═══════════════════════════════════════════════════════════════════
 // Alias for backward compatibility (called from _cargarProyectoData route)
-function guardarProyecto(){ guardarProyectoAs(); }
-
 function toggleMenuArchivo(e){
   const mi = document.getElementById('menuArchivo');
   if(!mi) return;
@@ -25672,8 +25694,12 @@ function toggleMenuArchivo(e){
   }
 }
 
-function guardarProyectoAs(evt){
-  const existing = window._proyectoNombre || 'biosim_proyecto';
+// v12.9 — La serialización se separó del guardado. Antes las dos cosas
+// vivían en guardarProyectoAs(): no había forma de obtener el JSON del
+// proyecto sin abrir además un diálogo de archivo, y por tanto no había
+// forma de implementar un «Guardar» que sobrescribiera en silencio.
+// Devuelve la cadena JSON, o null si la serialización falla.
+function _serializarProyecto(){
 
   // Helper: Uint8Array → base64 sin crash en arrays grandes
   function u8ToB64(u8){
@@ -25778,38 +25804,142 @@ function guardarProyectoAs(evt){
     return;
   }
 
-  const json = JSON.stringify(proj);
-  const blob = new Blob([json], {type:'application/json'});
-  const safeName = existing.replace(/[^a-zA-Z0-9_\-\.áéíóúÁÉÍÓÚñÑ ]/g,'_');
-  const fileName = safeName + '.bio';
+  return JSON.stringify(proj);
+}
 
-  // Intentar File System Access API (Chrome/Edge — da diálogo nativo del SO)
-  if(window.showSaveFilePicker){
-    (async()=>{
-      try{
-        const fh = await window.showSaveFilePicker({
-          suggestedName: fileName,
-          types:[{description:'BioSim Project',accept:{'application/json':['.bio']}}],
-          startIn:'documents'
-        });
-        const writable = await fh.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        // Guardar nombre limpio (sin extensión)
-        window._proyectoNombre = fh.name.replace(/\.bio$/i,'');
-        log('Proyecto guardado: '+fh.name,'ok');
-      } catch(e){
-        if(e.name==='AbortError') return; // usuario canceló
-        // Error real (p.ej. file://) → fallback a descarga
-        _downloadBlob(blob, fileName);
-        window._proyectoNombre = safeName;
-      }
-    })();
-  } else {
-    // Fallback universal: Firefox, Safari, file:// — el navegador no soporta showSaveFilePicker.
-    // Mostramos un modal propio para pedir el nombre antes de lanzar la descarga.
-    _showSaveModal(blob, existing);
+// ══════════════════════════════════════════════════════════════════════
+//  v12.9 — GUARDAR Y GUARDAR COMO
+//
+//  «Guardar» (Ctrl+S) sobrescribe el archivo del proyecto sin preguntar
+//  nada. «Guardar como» pide ubicación. Para que lo primero sea posible
+//  hay que recordar DÓNDE está el proyecto, y eso depende de dónde corra
+//  la aplicación:
+//
+//    · En la app de escritorio, el proceso principal de Electron escribe
+//      la ruta directamente (puente `biosimFS` del preload). Es el camino
+//      bueno: ruta real, escritura atómica, sin permisos que caduquen.
+//    · En un navegador servido por http(s), la File System Access API
+//      entrega un handle al archivo que el usuario eligió, y con ese
+//      handle se puede reescribir sin volver a preguntar.
+//    · Sobre file:// en un navegador normal no hay ninguna de las dos:
+//      una página local no puede escribir en el disco. Ahí «Guardar»
+//      tiene que comportarse como «Guardar como» y descargar. No es una
+//      limitación de BioSim sino del espacio aislado del navegador, y por
+//      eso existe la versión de escritorio.
+// ══════════════════════════════════════════════════════════════════════
+let _destinoProyecto = null;   // {tipo:'electron'|'handle', ruta?, handle?, nombre}
+
+function _hayDestino(){
+  return !!(_destinoProyecto && (_destinoProyecto.ruta || _destinoProyecto.handle));
+}
+
+// Refleja en la interfaz qué archivo se está editando y si puede
+// sobrescribirse de una sola pulsación.
+function _actualizarEstadoGuardado(){
+  const b = document.getElementById('bGuardar');
+  if(b){
+    const listo = _hayDestino();
+    b.disabled = false;
+    b.title = listo
+      ? 'Guardar en ' + (_destinoProyecto.nombre || 'el archivo del proyecto') + ' (Ctrl+S) — sobrescribe sin preguntar'
+      : 'Guardar proyecto (Ctrl+S) — la primera vez pide dónde';
+    b.classList.toggle('btn-a', listo);
+    b.classList.toggle('btn-g', !listo);
   }
+  const et = document.getElementById('archivoActual');
+  if(et){
+    et.textContent = _hayDestino() ? (_destinoProyecto.nombre || '') : '';
+    et.title = (_destinoProyecto && _destinoProyecto.ruta) ? _destinoProyecto.ruta : '';
+  }
+}
+
+function _recordarDestino(d){
+  _destinoProyecto = d;
+  if(d && d.nombre) window._proyectoNombre = d.nombre.replace(/\.bio$/i,'');
+  _actualizarEstadoGuardado();
+}
+
+function _nombreSugerido(){
+  const base = (window._proyectoNombre || 'biosim_proyecto')
+    .replace(/[^a-zA-Z0-9_\-\.áéíóúÁÉÍÓÚñÑ ]/g,'_');
+  return base + '.bio';
+}
+
+// ── Guardar: sobrescribe el destino conocido, sin diálogo ─────────────
+async function guardarProyecto(){
+  if(!_hayDestino()) return guardarProyectoAs();
+  const json = _serializarProyecto();
+  if(json == null) return;
+  try{
+    if(_destinoProyecto.tipo === 'electron'){
+      const r = await window.biosimFS.guardar(_destinoProyecto.ruta, json);
+      if(!r.ok){ log('No se pudo guardar: ' + (r.error||'error desconocido'), 'err'); return; }
+      log('Proyecto guardado: ' + r.nombre, 'ok');
+    } else {
+      const h = _destinoProyecto.handle;
+      // El permiso de escritura puede haber caducado entre sesiones.
+      if(h.queryPermission){
+        let p = await h.queryPermission({mode:'readwrite'});
+        if(p === 'prompt' && h.requestPermission) p = await h.requestPermission({mode:'readwrite'});
+        if(p !== 'granted'){
+          log('El navegador retiró el permiso de escritura sobre ese archivo. Usa «Guardar como».','warn');
+          return guardarProyectoAs();
+        }
+      }
+      const w = await h.createWritable();
+      await w.write(new Blob([json], {type:'application/json'}));
+      await w.close();
+      log('Proyecto guardado: ' + (_destinoProyecto.nombre || h.name), 'ok');
+    }
+    _actualizarEstadoGuardado();
+  }catch(e){
+    log('No se pudo guardar: ' + e.message, 'err');
+  }
+}
+
+// ── Guardar como: siempre pregunta dónde ──────────────────────────────
+async function guardarProyectoAs(evt){
+  const json = _serializarProyecto();
+  if(json == null) return;
+  const fileName = _nombreSugerido();
+
+  // 1) App de escritorio
+  if(window.biosimFS && window.biosimFS.disponible){
+    try{
+      const r = await window.biosimFS.guardarComo(fileName, json);
+      if(r.cancelado) return;
+      if(!r.ok){ log('No se pudo guardar: ' + (r.error||'error desconocido'), 'err'); return; }
+      _recordarDestino({tipo:'electron', ruta:r.ruta, nombre:r.nombre});
+      log('Proyecto guardado: ' + r.nombre + ' — en adelante Ctrl+S lo sobrescribe sin preguntar.', 'ok');
+      return;
+    }catch(e){ log('No se pudo guardar: ' + e.message, 'err'); return; }
+  }
+
+  const blob = new Blob([json], {type:'application/json'});
+
+  // 2) Navegador con File System Access API
+  if(window.showSaveFilePicker){
+    try{
+      const fh = await window.showSaveFilePicker({
+        suggestedName: fileName,
+        types:[{description:'Proyecto BioSim',accept:{'application/json':['.bio']}}],
+        startIn:'documents'
+      });
+      const w = await fh.createWritable();
+      await w.write(blob);
+      await w.close();
+      _recordarDestino({tipo:'handle', handle:fh, nombre:fh.name});
+      log('Proyecto guardado: ' + fh.name + ' — en adelante Ctrl+S lo sobrescribe sin preguntar.', 'ok');
+      return;
+    }catch(e){
+      if(e.name === 'AbortError') return;          // el usuario canceló
+      // Error real (típicamente file://) → seguir al modal de descarga
+    }
+  }
+
+  // 3) Descarga. Aquí no hay destino que recordar: el navegador no deja
+  //    reescribir lo que ya está en la carpeta de Descargas.
+  _showSaveModal(blob, window._proyectoNombre || 'biosim_proyecto');
 }
 
 function _showSaveModal(blob, defaultName){
@@ -25884,19 +26014,63 @@ function _downloadBlob(blob, fileName){
   log('Proyecto guardado: ' + fileName, 'ok');
 }
 
-function cargarProyecto(){
+// v12.9 — Abrir recuerda DE DÓNDE vino el proyecto, no solo su nombre.
+// Sin eso, el primer Ctrl+S después de abrir un archivo tendría que
+// volver a preguntar la ubicación, que es justo lo que se quería evitar.
+// Con <input type="file"> eso es imposible —el navegador entrega el
+// contenido pero no la ruta ni un handle de escritura—, así que se usa
+// el diálogo nativo cuando lo hay.
+function _aplicarProyectoTexto(txt, nombre, destino){
+  let proj;
+  try{ proj = JSON.parse(txt); }
+  catch(e){ log('Error al leer archivo: '+e.message,'err'); return false; }
+  if(!proj.version || !proj.version.startsWith('biosim')){
+    log('Archivo no compatible.','err'); return false;
+  }
+  window._proyectoNombre = (nombre||'').replace(/\.(bio|bsp\.json|json)$/i,'');
+  _cargarProyectoData(proj);
+  if(destino) _recordarDestino(destino);
+  else { _destinoProyecto = null; _actualizarEstadoGuardado(); }
+  return true;
+}
+
+async function cargarProyecto(){
+  // 1) App de escritorio: ruta real, y Ctrl+S ya sobrescribe este archivo.
+  if(window.biosimFS && window.biosimFS.disponible){
+    try{
+      const r = await window.biosimFS.abrir();
+      if(r.cancelado) return;
+      if(!r.ok){ log('No se pudo abrir: '+(r.error||'error desconocido'),'err'); return; }
+      if(_aplicarProyectoTexto(r.texto, r.nombre, {tipo:'electron', ruta:r.ruta, nombre:r.nombre}))
+        log('Proyecto abierto: '+r.nombre+' — Ctrl+S lo sobrescribe.','ok');
+      return;
+    }catch(e){ log('No se pudo abrir: '+e.message,'err'); return; }
+  }
+
+  // 2) Navegador con File System Access API: handle con permiso de escritura.
+  if(window.showOpenFilePicker){
+    try{
+      const [fh] = await window.showOpenFilePicker({
+        types:[{description:'Proyecto BioSim',accept:{'application/json':['.bio','.json']}}],
+        multiple:false
+      });
+      const txt = await (await fh.getFile()).text();
+      if(_aplicarProyectoTexto(txt, fh.name, {tipo:'handle', handle:fh, nombre:fh.name}))
+        log('Proyecto abierto: '+fh.name+' — Ctrl+S lo sobrescribe.','ok');
+      return;
+    }catch(e){
+      if(e.name === 'AbortError') return;
+      // Error real (típicamente file://) → seguir al input clásico
+    }
+  }
+
+  // 3) Input clásico. Da el contenido pero ni ruta ni permiso de
+  //    escritura, así que el primer guardado tendrá que preguntar.
   const inp=document.createElement('input');
   inp.type='file'; inp.accept='.json,.bsp.json,.bio';
   inp.onchange=async ev=>{
     const f=ev.target.files[0]; if(!f) return;
-    const txt=await f.text();
-    try{
-      const proj=JSON.parse(txt);
-      if(!proj.version||!proj.version.startsWith('biosim')){ log('Archivo no compatible.','err'); return; }
-      // Strip any known extension (.bio, .bsp.json, .json)
-      window._proyectoNombre = f.name.replace(/\.(bio|bsp\.json|json)$/i,'');
-      _cargarProyectoData(proj);
-    }catch(e){ log('Error al leer archivo: '+e.message,'err'); }
+    _aplicarProyectoTexto(await f.text(), f.name, null);
   };
   inp.click();
 }
@@ -27051,7 +27225,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.8
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.9
   </div>
 </div>
 <script>
@@ -28679,6 +28853,70 @@ function ctxDelete(){
 }
 
 // v5.5: diálogo "Acerca de" conciso con información institucional
+// v12.9 — Diagnóstico del entorno.
+// Recupera, dentro de la propia aplicación, lo único del menú nativo de
+// Electron que no estaba ya duplicado aquí: saber si WebGL está activo y
+// con qué se está renderizando. Es la primera pregunta cuando alguien
+// reporta «no veo el modelo», y en un equipo sin GPU compatible la
+// respuesta suele estar justo ahí.
+async function mostrarDiagnostico(){
+  let d = null;
+  if(window.biosimFS && window.biosimFS.diagnostico){
+    try{ d = await window.biosimFS.diagnostico(); }catch(e){}
+  }
+  // En navegador no hay proceso principal al que preguntar: se interroga
+  // al propio contexto WebGL.
+  let rend = '—', ver = '—';
+  try{
+    const gl = (renderer && renderer.getContext) ? renderer.getContext() : null;
+    if(gl){
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      if(dbg) rend = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '—';
+      ver = gl.getParameter(gl.VERSION) || '—';
+    }
+  }catch(e){}
+  const fila = (k,v) => `<tr><td style="padding:3px 14px 3px 0;color:var(--text3);white-space:nowrap">${k}</td>`
+                      + `<td style="padding:3px 0;color:var(--text2);font-family:var(--font-mono);word-break:break-all">${v}</td></tr>`;
+  let html = '<table style="font-size:.68rem;border-collapse:collapse">';
+  html += fila('Entorno', d ? 'Aplicación de escritorio (Electron)' : 'Navegador');
+  if(d){
+    html += fila('HTML cargado', d.html);
+    html += fila('Electron', d.electron);
+    html += fila('Chromium', d.chromium);
+    html += fila('WebGL (informe de Chromium)', d.webgl);
+    html += fila('Canvas 2D', d.canvas2d);
+  }
+  html += fila('Renderizador WebGL', rend);
+  html += fila('Versión WebGL', ver);
+  html += fila('Guardado directo', (window.biosimFS && window.biosimFS.disponible)
+    ? 'sí · ruta de archivo del sistema'
+    : (window.showSaveFilePicker ? 'sí · File System Access API del navegador'
+                                 : 'no · solo descarga (página local sin permisos de escritura)'));
+  html += fila('Proyecto actual', (_destinoProyecto && _destinoProyecto.ruta)
+    ? _destinoProyecto.ruta
+    : (_destinoProyecto && _destinoProyecto.nombre) || '(sin archivo asociado)');
+  html += '</table>';
+  const prev = document.getElementById('modalDiag');
+  if(prev) prev.remove();
+  const cont = document.createElement('div');
+  cont.id = 'modalDiag';
+  cont.setAttribute('style','position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9000;display:flex;align-items:center;justify-content:center;padding:14px');
+  cont.onclick = ev => { if(ev.target === cont) cont.remove(); };
+  cont.innerHTML =
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(620px,96vw);'
+  + 'max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:24px 28px">'
+  + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;'
+  + 'border-bottom:2px solid var(--border);padding-bottom:10px">'
+  + '<div style="font-size:1rem;font-weight:800;color:var(--text)">Diagnóstico del entorno</div>'
+  + '<button onclick="document.getElementById(\'modalDiag\').remove()" style="background:none;border:none;'
+  + 'font-size:1.4rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button></div>'
+  + html
+  + '<div style="font-size:.62rem;color:var(--text3);margin-top:14px;line-height:1.6">'
+  + 'Si «Renderizador WebGL» menciona SwiftShader, el visor 3D está corriendo por software: '
+  + 'funciona, pero va lento en modelos grandes.</div></div>';
+  document.body.appendChild(cont);
+}
+
 function mostrarAcercaDeNuevo(){
   const old = document.getElementById('modalAcercaNew');
   if(old) old.remove();
@@ -28687,7 +28925,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.8</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.9</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -28766,6 +29004,46 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Cambios en v12.9</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Botón Guardar que sobrescribe sin
+          diálogo.</strong> Hasta ahora toda forma de guardar pasaba por «Guardar como», es decir por una
+          ventana de ubicación, también cuando el archivo ya existía y solo se querían conservar los
+          últimos cambios. Ahora <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Ctrl+S</span> escribe directamente sobre el archivo del
+          proyecto, y la barra de herramientas tiene un botón que hace lo mismo y muestra al lado el
+          nombre del archivo en edición. <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Ctrl+Mayús+S</span> sigue siendo «guardar como»
+          y <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Ctrl+O</span> abre.
+          <br><br>
+          Para que eso fuera posible había que resolver un problema real: una página web no puede escribir
+          en una ruta del disco por su cuenta. La vía del navegador —la File System Access API— no funciona
+          sobre <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">file://</span>, que es justo como Electron carga la aplicación. Así que la
+          versión de escritorio incorpora ahora un puente mínimo al proceso principal
+          (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">src/preload.js</span>): tres operaciones sobre archivos <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">.bio</span>
+          y nada más — no se expone <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">require</span>, ni <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">fs</span>, ni
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">ipcRenderer</span> en crudo, y el aislamiento de contexto y el espacio aislado
+          siguen activos. La escritura es en dos tiempos, a un temporal y luego un renombrado atómico: si
+          la aplicación muere a mitad de guardar, el proyecto anterior queda intacto en vez de truncado.
+          <br><br>
+          <b>Abrir también recuerda de dónde vino el proyecto</b>, de modo que el primer Ctrl+S tras abrir
+          un archivo ya lo sobrescribe. Con el <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">&lt;input type="file"&gt;</span> clásico eso
+          es imposible: el navegador entrega el contenido pero ni la ruta ni permiso para reescribirla.
+          <br><br>
+          En un navegador normal servido por http(s) se usa la File System Access API, que da el mismo
+          comportamiento. Abriendo el HTML suelto como archivo local no hay ninguna de las dos vías y
+          «Guardar» se comporta como «Guardar como»: es una limitación del espacio aislado del navegador,
+          no de BioSim, y es una de las razones de ser de la versión de escritorio. El menú
+          <b>Ayuda → Diagnóstico del entorno</b> dice en cuál de los tres casos está.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Se eliminó la barra de menú nativa
+          de la ventana.</strong> Era la barra Archivo / Ver / Ayuda que Electron dibujaba encima de la
+          propia barra de BioSim. Duplicaba nombres sin duplicar funciones y no hacía nada que la
+          aplicación no hiciera ya por su cuenta. Lo que sí aportaba se conservó en otro sitio: recargar,
+          zoom, pantalla completa y herramientas de desarrollo siguen respondiendo a sus atajos
+          (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Ctrl+R</span>, <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Ctrl</span> con <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">+ − 0</span>,
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">F11</span>, <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">F12</span>), registrados ahora directamente en la
+          ventana; y el antiguo «Diagnóstico» de GPU pasó al menú Ayuda de la aplicación, donde además
+          informa del renderizador WebGL real y de si el guardado directo está disponible.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.8</div>
