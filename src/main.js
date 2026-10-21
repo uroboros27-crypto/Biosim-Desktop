@@ -17,7 +17,7 @@
 // ════════════════════════════════════════════════════════════════════
 'use strict';
 
-const { app, BrowserWindow, Menu, shell, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -90,7 +90,9 @@ function createMainWindow() {
     title: 'BioSim ' + APP_VERSION,
     icon: ICON_PATH || undefined,
     show: false,
+    autoHideMenuBar: true,   // sin barra de menú; Alt tampoco la reaparece
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -112,6 +114,33 @@ function createMainWindow() {
   });
 
   win.loadFile(APP_HTML);
+
+  // ── Atajos de teclado sin barra de menú ────────────────────────────
+  // La barra Archivo/Ver/Ayuda se eliminó: duplicaba el menú de la propia
+  // aplicación y sus entradas no hacían nada que BioSim no haga ya. Pero
+  // en Electron los atajos de recarga, zoom, pantalla completa y
+  // herramientas de desarrollo venían DE ese menú, así que al quitarlo se
+  // habrían perdido también. Se registran aquí para conservarlos.
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return;
+    const ctrl = input.control || input.meta;
+    const k = (input.key || '').toLowerCase();
+    const wc = win.webContents;
+    const acciones = {
+      'f12':          () => wc.toggleDevTools(),
+      'f11':          () => win.setFullScreen(!win.isFullScreen()),
+      'ctrl+r':       () => wc.reload(),
+      'ctrl+shift+r': () => wc.reloadIgnoringCache(),
+      'ctrl+shift+i': () => wc.toggleDevTools(),
+      'ctrl+0':       () => wc.setZoomLevel(0),
+      'ctrl++':       () => wc.setZoomLevel(Math.min(5, wc.getZoomLevel() + 0.5)),
+      'ctrl+=':       () => wc.setZoomLevel(Math.min(5, wc.getZoomLevel() + 0.5)),
+      'ctrl+-':       () => wc.setZoomLevel(Math.max(-5, wc.getZoomLevel() - 0.5))
+    };
+    const clave = ctrl ? ('ctrl+' + (input.shift ? 'shift+' : '') + k) : k;
+    const fn = acciones[clave];
+    if (fn) { e.preventDefault(); fn(); }
+  });
 
   // ── Manejo de ventanas emergentes ──────────────────────────────────
   // El generador de informe PDF de BioSim usa window.open('') +
@@ -147,70 +176,109 @@ function createMainWindow() {
   return win;
 }
 
-function buildMenu() {
-  const template = [
-    {
-      label: 'Archivo',
-      submenu: [
-        { role: 'quit', label: 'Salir' }
-      ]
-    },
-    {
-      label: 'Ver',
-      submenu: [
-        { role: 'reload', label: 'Recargar' },
-        { role: 'forceReload', label: 'Forzar recarga' },
-        { role: 'toggleDevTools', label: 'Herramientas de desarrollo' },
-        { type: 'separator' },
-        { role: 'resetZoom', label: 'Zoom 100%' },
-        { role: 'zoomIn', label: 'Acercar' },
-        { role: 'zoomOut', label: 'Alejar' },
-        { type: 'separator' },
-        { role: 'togglefullscreen', label: 'Pantalla completa' }
-      ]
-    },
-    {
-      label: 'Ayuda',
-      submenu: [
-        {
-          label: 'Diagnóstico',
-          click: () => {
-            const gpu = app.getGPUFeatureStatus ? app.getGPUFeatureStatus() : {};
-            dialog.showMessageBox({
-              type: 'info',
-              title: 'Diagnóstico de BioSim',
-              message: 'Estado del entorno',
-              detail:
-                'HTML cargado:\n' + (APP_HTML || '(ninguno)') + '\n\n' +
-                'Electron ' + process.versions.electron +
-                ' · Chromium ' + process.versions.chrome + '\n\n' +
-                'WebGL: ' + (gpu.webgl || 'desconocido') + '\n' +
-                'Aceleración 2D: ' + (gpu['2d_canvas'] || 'desconocido'),
-              buttons: ['Cerrar']
-            });
-          }
-        },
-        {
-          label: 'Acerca de BioSim',
-          click: () => {
-            dialog.showMessageBox({
-              type: 'info',
-              title: 'Acerca de BioSim',
-              message: 'BioSim ' + APP_VERSION,
-              icon: ICON_PATH ? nativeImage.createFromPath(ICON_PATH) : undefined,
-              detail:
-                'Simulador bioclimático autocontenido.\n' +
-                'Universidad de San Buenaventura — Pasto.\n\n' +
-                'Motor: Three.js r128 + Chart.js 4.4 (embebidos).\n' +
-                'Empaquetado de escritorio: Electron ' + process.versions.electron + '.',
-              buttons: ['Cerrar']
-            });
-          }
-        }
-      ]
-    }
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+// ══════════════════════════════════════════════════════════════════════
+//  Archivos de proyecto (.bio)
+//
+//  La página no puede escribir en el disco por su cuenta, y la File
+//  System Access API del navegador —que sería la vía natural— no está
+//  disponible sobre file://, que es como se carga la aplicación aquí.
+//  Estos manejadores son los que permiten que el botón Guardar
+//  sobrescriba el archivo sin volver a preguntar la ubicación.
+//
+//  Solo se aceptan rutas con extensión .bio: el renderer no debe poder
+//  pedir la escritura de un ejecutable o de un archivo de sistema.
+// ══════════════════════════════════════════════════════════════════════
+const FILTRO_BIO = [{ name: 'Proyecto BioSim', extensions: ['bio'] }];
+
+function rutaValida(ruta) {
+  return typeof ruta === 'string' && ruta.length > 0 && /\.bio$/i.test(ruta);
+}
+
+function escribir(ruta, texto) {
+  // Escritura en dos tiempos: primero a un temporal junto al destino y
+  // después un rename atómico. Si la aplicación muere a mitad de la
+  // escritura, el proyecto anterior sigue intacto en vez de quedar
+  // truncado — y un .bio truncado es trabajo perdido.
+  const tmp = ruta + '.tmp';
+  fs.writeFileSync(tmp, texto, 'utf8');
+  fs.renameSync(tmp, ruta);
+  return { ok: true, ruta, nombre: path.basename(ruta) };
+}
+
+ipcMain.handle('biosim:guardar', (evt, { ruta, texto }) => {
+  try {
+    if (!rutaValida(ruta)) return { ok: false, error: 'Ruta de proyecto no válida.' };
+    if (typeof texto !== 'string') return { ok: false, error: 'Contenido no válido.' };
+    return escribir(ruta, texto);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('biosim:guardarComo', async (evt, { nombreSugerido, texto }) => {
+  try {
+    if (typeof texto !== 'string') return { ok: false, error: 'Contenido no válido.' };
+    const win = BrowserWindow.fromWebContents(evt.sender);
+    const r = await dialog.showSaveDialog(win, {
+      title: 'Guardar proyecto BioSim',
+      defaultPath: nombreSugerido || 'biosim_proyecto.bio',
+      filters: FILTRO_BIO,
+      properties: ['createDirectory', 'showOverwriteConfirmation']
+    });
+    if (r.canceled || !r.filePath) return { ok: false, cancelado: true };
+    const ruta = /\.bio$/i.test(r.filePath) ? r.filePath : r.filePath + '.bio';
+    return escribir(ruta, texto);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('biosim:abrir', async (evt) => {
+  try {
+    const win = BrowserWindow.fromWebContents(evt.sender);
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Abrir proyecto BioSim',
+      filters: FILTRO_BIO,
+      properties: ['openFile']
+    });
+    if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, cancelado: true };
+    const ruta = r.filePaths[0];
+    const texto = fs.readFileSync(ruta, 'utf8');
+    return { ok: true, ruta, nombre: path.basename(ruta), texto };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('biosim:diagnostico', () => {
+  const gpu = app.getGPUFeatureStatus ? app.getGPUFeatureStatus() : {};
+  return {
+    html: APP_HTML || '(ninguno)',
+    version: APP_VERSION,
+    electron: process.versions.electron,
+    chromium: process.versions.chrome,
+    webgl: gpu.webgl || 'desconocido',
+    canvas2d: gpu['2d_canvas'] || 'desconocido'
+  };
+});
+
+// ══════════════════════════════════════════════════════════════════════
+//  Sin barra de menú
+//
+//  Hasta v12.8 había una barra nativa Archivo / Ver / Ayuda. Se eliminó
+//  por petición de uso: no hacía nada que la aplicación no haga ya por su
+//  cuenta —BioSim tiene su propio menú Archivo, su propio Acerca de y su
+//  propio manual— y tener dos barras de menú apiladas, una encima de la
+//  otra y con los mismos nombres, confundía más de lo que ayudaba.
+//
+//  Lo que SÍ aportaba se conservó en otro sitio:
+//    · recargar, zoom, pantalla completa y herramientas de desarrollo →
+//      atajos de teclado registrados en before-input-event;
+//    · el Diagnóstico de GPU/WebGL → expuesto por el preload y accesible
+//      desde el menú Ayuda de la propia aplicación.
+// ══════════════════════════════════════════════════════════════════════
+function quitarMenu() {
+  Menu.setApplicationMenu(null);
 }
 
 app.whenReady().then(() => {
@@ -226,7 +294,7 @@ app.whenReady().then(() => {
     return;
   }
 
-  buildMenu();
+  quitarMenu();
   createMainWindow();
 
   app.on('activate', () => {
