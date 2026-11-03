@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.11.1</title>
+<title>BioSim v12.12</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4129,7 +4129,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.11.1</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.12</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyecto()" style="font-weight:700" title="Sobrescribe el archivo del proyecto sin preguntar. La primera vez pide dónde guardarlo.">💾 Guardar proyecto <span style="float:right;opacity:.55;font-weight:400">Ctrl+S</span></a>
@@ -5648,7 +5648,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.11.1 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.12 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -11108,8 +11108,108 @@ function togOpacity(){
 // ═══════════════════════════════════════
 // ZONE MANAGEMENT
 // ═══════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  v12.12 — IDENTIFICADORES: CONTADORES Y REPARACIÓN
+//
+//  FALLO CORREGIDO. Los identificadores de zona, superficie y capa se
+//  generaban con un contador monótono (_zid, _sid, _lid) que se ponía a
+//  cero al limpiar la escena pero NUNCA se restauraba al abrir un
+//  proyecto. Abrir un .bio con zonas z1 y z2 dejaba _zid en 0, de modo
+//  que la siguiente zona creada nacía otra vez como «z1» y COLISIONABA
+//  con una existente.
+//
+//  Las consecuencias eran silenciosas y desconcertantes:
+//    · zones.find(z => z.id === 'z1') devuelve siempre la PRIMERA, así
+//      que la segunda zona homónima es inalcanzable por id;
+//    · el árbol muestra las mismas superficies bajo las dos zonas, porque
+//      surfaces.filter(s => s.zoneId === 'z1') las cuenta para ambas;
+//    · y sobre todo, CAMBIAR UNA SUPERFICIE DE UNA ZONA A LA OTRA NO
+//      HACE NADA: s.zoneId = 'z1' cuando ya valía 'z1'. El usuario elige
+//      la zona destino, confirma, y no pasa nada. Ese fue el síntoma
+//      reportado.
+//
+//  Se corrige por los dos extremos: resincronizando los contadores al
+//  cargar (para que no vuelva a ocurrir) y reparando los duplicados que
+//  ya existan en el archivo (para los proyectos que ya están dañados).
+// ══════════════════════════════════════════════════════════════════════
+
+// Mayor sufijo numérico presente en una colección de ids con prefijo.
+function _maxSufijoId(lista, prefijo){
+  let mx = 0;
+  for(const o of (lista||[])){
+    const id = o && o.id;
+    if(typeof id !== 'string') continue;
+    const m = new RegExp('^' + prefijo + '(\\d+)$').exec(id);
+    if(m){ const v = parseInt(m[1], 10); if(isFinite(v) && v > mx) mx = v; }
+  }
+  return mx;
+}
+
+// Deja los contadores por encima de todo lo que ya existe en el modelo.
+// Llamar SIEMPRE que se pueblen zones/surfaces/layers desde fuera
+// (abrir proyecto, autoguardado, importación).
+function resincronizarContadores(){
+  _zid = Math.max(_zid, _maxSufijoId(zones,    'z'));
+  _sid = Math.max(_sid, _maxSufijoId(surfaces, 's'));
+  _lid = Math.max(_lid, _maxSufijoId(layers,   'l'));
+  return {_zid, _sid, _lid};
+}
+
+// Repara identificadores repetidos. Devuelve un informe de lo cambiado.
+//
+// En zonas, qué superficie pertenecía a cuál es IRRECUPERABLE: todas
+// apuntan al mismo id, que es justamente el daño. Así que la primera
+// zona conserva el id y sus superficies, y la duplicada recibe uno nuevo
+// y queda vacía. Es la única lectura honesta de un archivo en el que las
+// dos zonas eran, de hecho, la misma. Se avisa al usuario en vez de
+// arreglarlo en silencio, porque tendrá que reasignar a mano.
+function repararIdsDuplicados(){
+  const inf = {zonas:[], superficies:[], capas:[]};
+
+  const vistosZ = new Set();
+  zones.forEach(z => {
+    if(!vistosZ.has(z.id)){ vistosZ.add(z.id); return; }
+    const viejo = z.id, nuevo = 'z' + (++_zid);
+    z.id = nuevo; vistosZ.add(nuevo);
+    inf.zonas.push({nombre:z.name, de:viejo, a:nuevo});
+  });
+
+  const vistosS = new Set();
+  surfaces.forEach(s => {
+    if(!vistosS.has(s.id)){ vistosS.add(s.id); return; }
+    const viejo = s.id, nuevo = 's' + (++_sid);
+    s.id = nuevo; vistosS.add(nuevo);
+    if(s.mesh) s.mesh.userData && (s.mesh.userData.surfId = nuevo);
+    inf.superficies.push({nombre:s.name, de:viejo, a:nuevo});
+  });
+
+  const vistosL = new Set();
+  (layers||[]).forEach(l => {
+    if(!vistosL.has(l.id)){ vistosL.add(l.id); return; }
+    const viejo = l.id, nuevo = 'l' + (++_lid);
+    l.id = nuevo; vistosL.add(nuevo);
+    inf.capas.push({nombre:l.name, de:viejo, a:nuevo});
+  });
+
+  // Referencias que pudieran haber quedado apuntando a un id inexistente.
+  const idsZ = new Set(zones.map(z=>z.id));
+  surfaces.forEach(s => {
+    if(s.neighborZoneId && !idsZ.has(s.neighborZoneId)){
+      s.neighborZoneId = null;
+      if(s.partition === 'shared') s.partition = null;
+    }
+  });
+  if(activeZone && !idsZ.has(activeZone)) activeZone = zones.length ? zones[0].id : null;
+
+  return inf;
+}
+
 function crearZona(name,color,vol,layId){
-  const id='z'+(++_zid);
+  // v12.12 — Blindaje: aunque algún camino olvide resincronizar, nunca se
+  // devuelve un id que ya esté en uso. Un id de zona repetido hace que
+  // mover superficies entre las dos zonas no haga nada.
+  let id = 'z' + (++_zid);
+  while(zones.some(z => z.id === id)) id = 'z' + (++_zid);
   const z={id,name:name||`Zona ${_zid}`,color:color||ZCOLS[(_zid-1)%ZCOLS.length],volume:vol||1,layerId:layId||null,_open:true,
     thermal:false,  // T flag: participates in thermal simulation
     shader:true,    // S flag: participates in shadow calculation (default ON)
@@ -26623,6 +26723,28 @@ function _cargarProyectoData(proj){
     _spRenderPanel();
   }
   if(_spReady) spInit();
+
+  // ── v12.12: identificadores ───────────────────────────────────────
+  // Primero resincronizar los contadores con lo que trae el archivo, y
+  // después reparar duplicados. El orden importa: la reparación pide
+  // ids nuevos a los contadores, y si siguieran en cero los repetiría.
+  resincronizarContadores();
+  {
+    const inf = repararIdsDuplicados();
+    const tot = inf.zonas.length + inf.superficies.length + inf.capas.length;
+    if(tot > 0){
+      log(`⚠ El proyecto traía ${tot} identificador(es) repetido(s) — se han reasignado.`, 'err');
+      inf.zonas.forEach(d =>
+        log(`   Zona "${d.nombre}": ${d.de} → ${d.a}. Compartía identificador con otra zona, así que ` +
+            `AMBAS mostraban las mismas superficies y mover objetos entre ellas no hacía nada. ` +
+            `Las superficies se quedan en la primera; reasigna a mano las que pertenezcan a "${d.nombre}".`, 'warn'));
+      inf.superficies.forEach(d => log(`   Superficie "${d.nombre}": ${d.de} → ${d.a}.`, 'warn'));
+      inf.capas.forEach(d => log(`   Capa "${d.nombre}": ${d.de} → ${d.a}.`, 'warn'));
+      log('   Guarda el proyecto para consolidar la corrección.', 'ok');
+      try{ renderZoneTree(); colorZona(); }catch(e){}
+    }
+  }
+
   log(`Proyecto "${window._proyectoNombre||'sin nombre'}" cargado: ${zones.length} zonas, ${surfaces.length} superficies.`,'ok');
 
   }catch(e){
@@ -27487,7 +27609,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.11.1
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.12
   </div>
 </div>
 <script>
@@ -29173,7 +29295,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.11.1</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.12</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -29252,6 +29374,39 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.12</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Cambiar un objeto de zona no hacía nada, por
+          identificadores de zona repetidos.</strong> Los ids de zona, superficie y capa se generan con
+          un contador monótono (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">_zid</span>, <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">_sid</span>,
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">_lid</span>) que se ponía a cero al limpiar la escena pero <b>nunca se
+          restauraba al abrir un proyecto</b>. Abrir un <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">.bio</span> con zonas z1 y z2
+          dejaba el contador en 0, así que la siguiente zona creada nacía otra vez como «z1» y chocaba
+          con una existente.
+          <br><br>
+          El daño era silencioso y desconcertante. Con dos zonas compartiendo id:
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">zones.find(z =&gt; z.id === 'z1')</span> devuelve siempre la primera, así que
+          la segunda es inalcanzable; el árbol muestra las mismas superficies bajo ambas, porque
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">surfaces.filter(s =&gt; s.zoneId === 'z1')</span> las cuenta dos veces; y
+          <b>mover una superficie de una zona a la otra es escribir el valor que ya tenía</b>. El usuario
+          elige la zona destino, confirma, y no ocurre nada. Reproducido sobre un proyecto real: tres
+          zonas de las que dos tenían el id <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">z1</span>, las dos reportando las mismas 96
+          superficies, y el traslado devolviendo <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">antes: z1 → después: z1</span>.
+          <br><br>
+          Se corrige por los dos extremos. <b>Para que no vuelva a pasar</b>:
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">resincronizarContadores()</span> deja cada contador por encima del mayor
+          sufijo presente al cargar, y <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">crearZona()</span> lleva además un blindaje que
+          salta cualquier id ya ocupado aunque algún camino olvide resincronizar. <b>Para los archivos ya
+          dañados</b>: <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">repararIdsDuplicados()</span> se ejecuta al abrir, reasigna los
+          repetidos y lo dice en el registro en vez de arreglarlo en silencio.
+          <br><br>
+          Un matiz de la reparación: en zonas, <b>qué superficie pertenecía a cuál es irrecuperable</b>,
+          porque todas apuntan al mismo id — eso es precisamente el daño. La primera zona conserva el id
+          y sus superficies; la duplicada recibe uno nuevo y queda vacía. Es la única lectura honesta de
+          un archivo en el que las dos zonas eran, de hecho, la misma, y por eso el aviso pide reasignar
+          a mano lo que corresponda.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Cambios en v12.11</div>
