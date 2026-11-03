@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioSim v12.12</title>
+<title>BioSim v12.13</title>
 <!-- Icono de la aplicación, embebido como data URI para mantener el
      archivo 100% autocontenido: sin él, el navegador pediría /favicon.ico
      al servidor y en modo file:// dejaría un 404 en la consola. -->
@@ -4032,13 +4032,30 @@ canvas#cv{display:block;}
 .bbody{padding:8px;overflow:auto;height:calc(100% - 30px);display:none}
 .bbody.act{display:block}
 .chart-w{height:calc(100% - 46px);min-height:120px}
+/* v12.13 — La pestaña de confort no es solo una gráfica: debajo van la tabla
+   mensual, la comparativa por zona, las gráficas por zona y las conclusiones.
+   Con la altura heredada el gráfico se comía la ventana entera y había que
+   desplazarse mucho para llegar a lo demás. */
+#bConf .chart-w{height:300px;min-height:220px}
 /* ── Temperatura + Perfil Horario: proporciones corregidas (v0.7) ─────────
    Estos dos paneles usan flex-column propio para garantizar altura mínima
    de 360px en la gráfica, independientemente del panel inferior.          */
 #bChart.bbody, #bPerfil.bbody{display:none;flex-direction:column;overflow-y:auto;height:calc(100% - 30px);padding:0}
 #bChart.bbody.act, #bPerfil.bbody.act{display:flex}
-#bChart .chart-scroll-wrap, #bPerfil .chart-scroll-wrap{flex-shrink:0;padding:6px 8px 8px;min-height:360px;height:max(360px, calc(100% - 8px));display:flex;flex-direction:column}
+/* v12.13 — `height` fija convertida en `min-height`. La caja contenía la
+   barra de botones, un texto explicativo de altura variable y el gráfico con
+   min-height:320px; cuando el texto crecía, la suma superaba la altura fija y
+   el contenido se salía de su caja (medido: 78 px en Temperatura, 27 px en
+   Perfil). Con min-height la caja crece y el panel, que ya tiene overflow-y,
+   se desplaza. */
+#bChart .chart-scroll-wrap, #bPerfil .chart-scroll-wrap{flex-shrink:0;padding:6px 8px 8px;height:auto;min-height:max(360px, calc(100% - 8px));display:flex;flex-direction:column}
 #bChart .chart-scroll-wrap .chart-w, #bPerfil .chart-scroll-wrap .chart-w{flex:1;min-height:320px;height:auto}
+/* v12.13 — La escala de color de radiación llevaba height="200" como atributo
+   del canvas y ninguna altura en CSS, así que imponía 200 px aunque su columna
+   midiera menos y se desbordaba 71 px. Ahora el canvas se ajusta a la columna;
+   el búfer de dibujo sigue en 200 px y el degradado escala sin artefactos. */
+#radLegendCol > div:last-child{min-height:0}
+#radLegendCanvas{height:100%;min-height:60px}
 /* ── Bottom panel drag-resizer ── */
 #btmResizer{height:6px;background:transparent;cursor:row-resize;display:flex;align-items:center;justify-content:center;border-top:1px solid var(--border);flex-shrink:0;position:relative;z-index:10}
 #btmResizer::after{content:'';display:block;width:40px;height:3px;background:var(--accent);border-radius:2px;opacity:0;transition:opacity .2s}
@@ -4129,7 +4146,7 @@ canvas#cv{display:block;}
 
 <!-- TOPBAR -->
 <div id="topbar">
-  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.12</span></div>
+  <div class="logo">BIO<em>SIM</em> <span style="font-size:.6rem;color:var(--text3);font-weight:400">v12.13</span></div>
   <div class="menu-item" id="menuArchivo" onclick="toggleMenuArchivo(event)">Archivo
     <div class="menu-dropdown">
       <a onclick="guardarProyecto()" style="font-weight:700" title="Sobrescribe el archivo del proyecto sin preguntar. La primera vez pide dónde guardarlo.">💾 Guardar proyecto <span style="float:right;opacity:.55;font-weight:400">Ctrl+S</span></a>
@@ -4945,11 +4962,22 @@ canvas#cv{display:block;}
           🌡 Confort Adaptativo ASHRAE 55-2010 — % de <b>horas ocupadas</b> dentro de las bandas de aceptabilidad 80% y 90%, por mes
           <span id="confScopeLbl" style="color:var(--accent)"></span>
         </div>
+        <!-- v12.13 — Cada bloque en SU contenedor.
+             Hasta v12.12 la tabla mensual, la comparativa por zona y las
+             conclusiones se inyectaban dentro de .chart-w, que tiene altura
+             fija (calc(100% - 46px)) porque aloja un canvas de Chart.js
+             dimensionado al padre. Tres bloques de altura libre dentro de una
+             caja de altura fija se desbordan y se pintan encima de lo que
+             venga después: por eso las gráficas por zona aparecían
+             superpuestas a las tablas. -->
         <div class="chart-w"><canvas id="cConf"></canvas></div>
+        <div id="confVacio" style="display:none;padding:20px;text-align:center;color:#7a90b8;font-size:.72rem"></div>
+        <div id="confTablaMes"></div>
         <!-- v9.5: una gráfica por zona térmica. Con seis zonas, la gráfica
              conjunta superpone 12 series de barras y es imposible saber a qué
              zona corresponde cada una. -->
         <div id="confZoneCharts"></div>
+        <div id="confTablas"></div>
       </div>
       <div class="bbody" id="bStat">
         <div style="display:flex;justify-content:flex-end;padding:3px 6px;border-bottom:1px solid var(--border);flex-shrink:0">
@@ -5648,7 +5676,7 @@ canvas#cv{display:block;}
     </div>
   </div>
 </div>
-<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.12 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
+<div id="log"><span style="font-size:.6rem;color:var(--text3);flex-shrink:0">▶</span><div id="logTxt">BioSim v12.13 — listo · Fusión v6.8 (offline + BVH + contraventanas + confort) con v6.3: sombra parcial multipunto sobre BVH, corrección del NORTE en sombras/radiación, paneles colapsables (clic en divisores) y bootstrap reparado.</div></div>
 
 <!-- PROGRESS -->
 <div id="simProg" class="h">
@@ -22768,11 +22796,23 @@ function _graficarConfortPorZona(limitsPerMonth, dias, meses, PAL){
 function graficarC(){
   if(chartC) chartC.destroy();
   _destruirChartsZona();
+  // v12.13 — El aviso de «sin datos» se escribía con innerHTML sobre
+  // .chart-w, lo que BORRABA el <canvas id="cConf">. Tras simular, esta
+  // misma función volvía a buscarlo y encontraba null. Ahora el aviso vive
+  // en su propio div y el canvas no se toca.
+  const _vac = document.getElementById('confVacio');
+  const _cwv = document.querySelector('#bConf .chart-w');
+  ['confTablaMes','confZoneCharts','confTablas'].forEach(id=>{
+    const e=document.getElementById(id); if(e) e.innerHTML='';
+  });
   if(!results || results.length===0 || !results[0] || results[0].length<1){
-    document.getElementById('cConf').parentElement.innerHTML=
-      '<div style="padding:20px;text-align:center;color:#7a90b8;font-size:.72rem">Ejecuta la simulación primero para ver el análisis de confort.</div>';
+    if(_vac){ _vac.textContent='Ejecuta la simulación primero para ver el análisis de confort.';
+              _vac.style.display='block'; }
+    if(_cwv) _cwv.style.display='none';
     return;
   }
+  if(_vac) _vac.style.display='none';
+  if(_cwv) _cwv.style.display='';
 
   // ─── Paleta canónica de confort (v3.5) ─────────────────────────────
   // Tres colores unificados — usados en TODOS los componentes del informe
@@ -22913,7 +22953,9 @@ function graficarC(){
   // v9.5: una gráfica independiente por zona, debajo de la conjunta
   _graficarConfortPorZona(limitsPerMonth, dias, meses, COMFORT_PALETTE);
 
-  const parent=document.getElementById('cConf').parentElement;
+  // v12.13 — Destinos propios, fuera de la caja de altura fija del gráfico.
+  const parent    = document.getElementById('confTablaMes');   // tabla mensual
+  const parentFin = document.getElementById('confTablas');     // comparativa y conclusiones
 
   // Use first thermal zone (results[0] ↔ thermalZones[0])
   const tz0 = thermalZones[0];
@@ -23052,7 +23094,7 @@ function graficarC(){
       .replace(/color:#223/g,'color:var(--text2)')
       .replace(/border-bottom:1px solid #eef0f8/g,'border-bottom:1px solid var(--border)')
       .replace(/border-bottom:2px solid #dce4f0/g,'border-bottom:2px solid var(--border)');
-    parent.appendChild(pz);
+    parentFin.appendChild(pz);
   }
 
   // ── Conclusions block ─────────────────────────────────────────────
@@ -23310,7 +23352,7 @@ function graficarC(){
         <li><b style="color:#0040a0">Envolvente:</b> cubierta U≤0.30 W/m²K · muros U≤0.50 W/m²K · vidrios SHGC≤0.40 para reducir carga térmica.</li>
       </ul>
     </div>`;
-  parent.appendChild(conc);
+  parentFin.appendChild(conc);
 }
 
 function mostrarStats(){
@@ -27609,7 +27651,7 @@ img{
   <h1>INFORME DE BALANCE ENERGÉTICO</h1>
   ${body}
   <div class="rpt-footer">
-    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.12
+    Generado: ${new Date().toLocaleString('es')} &nbsp;·&nbsp; Método: CIBSE Admittance Guide A (2015) &nbsp;·&nbsp; BioSim v12.13
   </div>
 </div>
 <script>
@@ -29295,7 +29337,7 @@ function mostrarAcercaDeNuevo(){
   <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;width:min(720px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.75);padding:30px 36px 24px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;border-bottom:2px solid var(--border);padding-bottom:14px">
       <div>
-        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.12</span></div>
+        <div style="font-size:1.7rem;font-weight:800;color:var(--text);letter-spacing:.04em">BIO<em style="color:var(--accent);font-style:normal">SIM</em> <span style="font-size:.85rem;color:var(--text3);font-weight:400;margin-left:6px">v12.13</span></div>
         <div style="font-size:.72rem;color:var(--text3);margin-top:4px;font-family:var(--font-mono)">Simulador Bioclimático Educativo</div>
       </div>
       <button onclick="document.getElementById('modalAcercaNew').remove()" style="background:none;border:none;font-size:1.5rem;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1">✕</button>
@@ -29374,6 +29416,41 @@ function mostrarAcercaDeNuevo(){
         <li style="margin-bottom:7px">Herramientas de modelo: inversión de normales, división de superficies
           fundidas al importar, separación por aristas reales del archivo de origen, visualización por zona
           y por etiqueta, y plano de sección arrastrable.</li>
+      </ul>
+
+      <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.13</div>
+      <ul style="padding-left:20px;margin:8px 0">
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">La pestaña de confort superponía la información.</strong>
+          La tabla mensual, la comparativa por zona y el bloque de conclusiones se inyectaban con
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">document.getElementById('cConf').parentElement</span>, es decir <b>dentro de
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">.chart-w</span></b> — la caja que aloja el lienzo de Chart.js y que por eso
+          tiene altura fija (<span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">calc(100% − 46px)</span>). Tres bloques de altura libre
+          dentro de una caja de altura fija y sin recorte se salen de ella y se pintan encima de lo que
+          venga después; en este caso, de las gráficas por zona. Medido con un detector de desbordes
+          sobre el modelo del usuario: <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">.chart-w</span> sobresalía
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">1.499 px</span> de su propia caja.
+          <br><br>
+          Ahora cada bloque tiene su contenedor y el orden de lectura es el natural: gráfica anual →
+          tabla mensual → gráficas por zona → comparativa → conclusiones. El gráfico principal pasa de
+          ocupar la ventana entera a una altura acotada de 300 px, porque esta pestaña no es solo una
+          gráfica.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">Otros tres desbordes, encontrados al auditar el
+          resto.</strong> El mismo detector se pasó por las ocho pestañas con resultados cargados, y la
+          de confort no era la única:
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Temperatura</span> desbordaba 78 px y <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Perfil horario</span>
+          27 px, porque su caja tenía altura fija y contenía una barra de botones, un texto explicativo
+          de altura variable y un gráfico con <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">min-height:320px</span>: cuando el texto
+          crecía, la suma no cabía. Y la escala de color de <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">Radiación</span> desbordaba
+          71 px, porque el lienzo llevaba <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">height="200"</span> como atributo y ninguna
+          altura en CSS, así que imponía 200 px aunque su columna midiera menos. Los dos primeros se
+          arreglan convirtiendo la altura fija en mínima —la caja crece y el panel, que ya tiene
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">overflow-y</span>, se desplaza—; el tercero, dejando que el lienzo se ajuste
+          a su columna. Tras el cambio el detector devuelve <b>cero desbordes en las ocho pestañas</b>.</li>
+        <li style="margin-bottom:7px"><strong style="color:var(--text)">El aviso de «sin datos» destruía el lienzo del
+          gráfico.</strong> Se escribía con <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">innerHTML</span> sobre
+          <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">.chart-w</span>, lo que borraba el <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">&lt;canvas id="cConf"&gt;</span>.
+          Tras simular, la misma función volvía a buscarlo y encontraba <span style="font-family:var(--font-mono);font-size:.94em;color:var(--accent2)">null</span>.
+          Ahora el aviso vive en su propio div y el lienzo no se toca.</li>
       </ul>
 
       <div style="font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);padding-bottom:4px;margin:20px 0 8px">Corregido en v12.12</div>
